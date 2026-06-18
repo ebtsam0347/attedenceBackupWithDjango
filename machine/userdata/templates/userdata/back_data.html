@@ -1,0 +1,381 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Back Data — SFA Attendance</title>
+<link rel="stylesheet" href="{% static 'userdata/css/font-awesome.min.css' %}">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{
+  --bg:#080b14;--surface:rgba(255,255,255,.04);--surface2:rgba(255,255,255,.07);
+  --border:rgba(255,255,255,.08);--text:#eef0f6;--muted:rgba(255,255,255,.38);--muted2:rgba(255,255,255,.55);
+  --green:#2ecc71;--gd:rgba(46,204,113,.14);--gb:rgba(46,204,113,.32);
+  --red:#e74c3c;--rd:rgba(231,76,60,.14);--rb:rgba(231,76,60,.32);
+  --blue:#4361ee;--bd:rgba(67,97,238,.16);--bb:rgba(67,97,238,.38);
+  --gold:#f59e0b;--goldD:rgba(245,158,11,.14);--goldB:rgba(245,158,11,.3);
+  --purple:#7c3aed;
+  --radius:14px;--radius-sm:8px;
+}
+html{scroll-behavior:smooth;}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,Arial,sans-serif;min-height:100vh;overflow-x:hidden;}
+body::before{content:'';position:fixed;top:-200px;left:-200px;width:700px;height:700px;border-radius:50%;background:radial-gradient(circle,rgba(67,97,238,.1) 0%,transparent 70%);pointer-events:none;z-index:0;}
+
+/* NAV */
+.topnav{height:58px;background:rgba(8,11,20,.75);backdrop-filter:blur(20px);position:sticky;top:0;z-index:200;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 28px;}
+.nav-left{display:flex;align-items:center;gap:4px;}
+.nav-brand{font-size:14px;font-weight:800;letter-spacing:.5px;color:var(--text);margin-right:8px;display:flex;align-items:center;gap:8px;}
+.nav-brand-dot{width:8px;height:8px;border-radius:50%;background:linear-gradient(135deg,var(--blue),var(--purple));}
+.nav-link{font-size:12px;color:var(--muted);text-decoration:none;padding:6px 12px;border-radius:var(--radius-sm);transition:.2s;font-weight:500;}
+.nav-link:hover{color:var(--text);background:rgba(255,255,255,.06);}
+.nav-link.active{color:#fff;background:var(--bd);border:1px solid var(--bb);}
+.nav-link.live-link{color:var(--green);}
+.nav-clock{font-family:monospace;font-size:12px;color:var(--muted);background:var(--surface);border:1px solid var(--border);padding:4px 12px;border-radius:20px;}
+
+/* WRAPPER */
+.wrapper{max-width:1340px;margin:0 auto;padding:36px 28px 60px;position:relative;z-index:1;}
+
+/* PAGE HEADER */
+.page-header{display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:16px;margin-bottom:28px;}
+.page-badge{display:inline-flex;align-items:center;gap:6px;background:var(--goldD);border:1px solid var(--goldB);padding:3px 12px;border-radius:20px;font-size:10px;font-weight:800;letter-spacing:1px;color:var(--gold);text-transform:uppercase;margin-bottom:8px;}
+.page-title{font-size:clamp(22px,3.5vw,34px);font-weight:900;letter-spacing:-1px;background:linear-gradient(135deg,#fff 40%,rgba(255,255,255,.4));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+.page-sub{font-size:13px;color:var(--muted);margin-top:4px;}
+
+/* STATS */
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px;}
+.stat-card{background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;display:flex;align-items:center;gap:14px;transition:.2s;position:relative;overflow:hidden;}
+.stat-card:hover{border-color:rgba(255,255,255,.14);transform:translateY(-1px);}
+.stat-card::after{content:'';position:absolute;top:0;left:0;right:0;height:2px;}
+.stat-card.total::after{background:linear-gradient(90deg,var(--blue),var(--purple));}
+.stat-card.cin::after{background:linear-gradient(90deg,var(--green),#00c9a7);}
+.stat-card.cout::after{background:linear-gradient(90deg,var(--red),#ff6b6b);}
+.stat-card.uniq::after{background:linear-gradient(90deg,var(--gold),#f97316);}
+.stat-icon{width:46px;height:46px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;}
+.si-blue  {background:var(--bd);color:var(--blue);}
+.si-green {background:var(--gd);color:var(--green);}
+.si-red   {background:var(--rd);color:var(--red);}
+.si-gold  {background:var(--goldD);color:var(--gold);}
+.stat-val {font-size:30px;font-weight:900;line-height:1;}
+.stat-lbl {font-size:11px;color:var(--muted);margin-top:3px;font-weight:500;}
+
+/* PULL FORM */
+.pull-form-card{background:rgba(255,255,255,.025);border:1px solid var(--border);border-radius:var(--radius);padding:20px 24px;margin-bottom:20px;}
+.pull-form-title{font-size:12px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:16px;display:flex;align-items:center;gap:8px;}
+.form-row{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;}
+.form-group{display:flex;flex-direction:column;gap:6px;}
+.form-label{font-size:10px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase;}
+.form-input{background:rgba(255,255,255,.06);border:1px solid var(--border);color:var(--text);padding:10px 14px;border-radius:var(--radius-sm);font-size:13px;outline:none;transition:.25s;min-width:160px;}
+.form-input:focus{border-color:var(--gold);background:rgba(245,158,11,.06);box-shadow:0 0 0 3px rgba(245,158,11,.1);}
+.form-input::-webkit-calendar-picker-indicator{filter:invert(.6);}
+.form-input.search{min-width:220px;}
+.btn{padding:10px 20px;border-radius:var(--radius-sm);font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:7px;transition:.2s;white-space:nowrap;border:none;text-decoration:none;}
+.btn-pull{background:linear-gradient(135deg,var(--gold),#f97316);color:#fff;}
+.btn-pull:hover{opacity:.85;transform:translateY(-1px);}
+.btn-pull:disabled{opacity:.5;cursor:not-allowed;transform:none;}
+.btn-view{background:linear-gradient(135deg,var(--blue),var(--purple));color:#fff;}
+.btn-view:hover{opacity:.85;transform:translateY(-1px);}
+.btn-ghost{background:rgba(255,255,255,.04);color:var(--muted2);border:1px solid var(--border);}
+.btn-ghost:hover{background:rgba(255,255,255,.08);color:var(--text);}
+.form-spacer{flex:1;}
+
+/* PULL RESULT */
+.pull-result{border-radius:var(--radius);padding:16px 20px;margin-bottom:20px;border:1px solid;}
+.pull-result.success{background:var(--gd);border-color:var(--gb);}
+.pull-result.warning{background:rgba(245,158,11,.08);border-color:var(--goldB);}
+.pull-result.error{background:var(--rd);border-color:var(--rb);}
+.pr-title{font-size:13px;font-weight:800;margin-bottom:10px;display:flex;align-items:center;gap:8px;}
+.pr-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}
+.pr-chip{display:inline-flex;align-items:center;gap:7px;padding:5px 13px;border-radius:20px;font-size:11px;font-weight:600;}
+.pr-chip.ok {background:var(--gd);border:1px solid var(--gb);color:var(--green);}
+.pr-chip.err{background:var(--rd);border:1px solid var(--rb);color:var(--red);}
+
+/* TOOLBAR */
+.toolbar{background:rgba(255,255,255,.025);border:1px solid var(--border);border-radius:var(--radius);padding:14px 20px;margin-bottom:20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+.rec-count{font-size:12px;color:var(--muted);background:var(--surface);border:1px solid var(--border);padding:5px 12px;border-radius:20px;white-space:nowrap;}
+
+/* ALERT */
+.alert-err{background:var(--rd);border:1px solid var(--rb);color:var(--red);padding:12px 16px;border-radius:var(--radius-sm);font-size:13px;margin-bottom:16px;display:flex;align-items:center;gap:8px;}
+
+/* TABLE */
+.table-card{background:rgba(255,255,255,.025);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;}
+.table-wrap{overflow-x:auto;}
+table.at{width:100%;border-collapse:collapse;}
+table.at thead{background:rgba(255,255,255,.03);}
+table.at th{padding:13px 16px;font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);text-align:left;border-bottom:1px solid var(--border);white-space:nowrap;}
+table.at td{padding:13px 16px;font-size:14px;border-bottom:1px solid rgba(255,255,255,.04);vertical-align:middle;}
+table.at tbody tr{transition:.15s;}
+table.at tbody tr:hover{background:rgba(255,255,255,.03);}
+table.at tbody tr:last-child td{border-bottom:none;}
+.row-num{font-size:11px;color:var(--muted);font-family:monospace;}
+.td-name{font-size:15px;font-weight:700;}
+.td-reg{font-size:11px;color:rgba(100,160,255,.7);font-family:monospace;background:rgba(255,255,255,.05);padding:3px 9px;border-radius:20px;display:inline-block;}
+.td-squad{font-size:13px;color:var(--muted2);}
+.td-date{font-family:monospace;font-size:12px;font-weight:700;color:var(--text);}
+.td-time{font-family:monospace;font-size:12px;color:var(--muted2);}
+.td-device{font-size:11px;color:var(--muted);}
+.td-id{font-family:monospace;font-size:12px;color:var(--muted);}
+
+.badge{display:inline-flex;align-items:center;gap:5px;padding:4px 11px;border-radius:20px;font-size:12px;font-weight:700;}
+.badge-in {background:var(--gd);color:var(--green);border:1px solid var(--gb);}
+.badge-out{background:var(--rd);color:var(--red);  border:1px solid var(--rb);}
+.badge-other{background:var(--goldD);color:var(--gold);border:1px solid var(--goldB);}
+
+.api-badge{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:20px;font-size:10px;font-weight:700;}
+.api-sent    {background:var(--gd);color:var(--green);border:1px solid var(--gb);}
+.api-failed  {background:var(--rd);color:var(--red);  border:1px solid var(--rb);}
+.api-pending {background:var(--goldD);color:var(--gold);border:1px solid var(--goldB);}
+.api-dup     {background:rgba(255,255,255,.05);color:var(--muted);border:1px solid var(--border);}
+
+.empty-state{padding:80px 30px;text-align:center;}
+.es-icon{font-size:60px;opacity:.12;display:block;margin-bottom:16px;}
+.es-title{font-size:18px;font-weight:700;color:var(--muted2);margin-bottom:8px;}
+.es-sub{font-size:13px;color:var(--muted);line-height:1.7;}
+
+.table-footer{padding:12px 20px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:rgba(255,255,255,.015);}
+.tf-info{font-size:11px;color:var(--muted);}
+
+/* LOADING OVERLAY */
+.loading-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(8,11,20,.85);z-index:999;align-items:center;justify-content:center;flex-direction:column;gap:20px;backdrop-filter:blur(6px);}
+.loading-overlay.show{display:flex;}
+.spinner{width:50px;height:50px;border:3px solid rgba(245,158,11,.2);border-top-color:var(--gold);border-radius:50%;animation:spin .8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-text{font-size:15px;font-weight:700;color:var(--gold);}
+.loading-sub{font-size:12px;color:var(--muted);}
+
+@media(max-width:1100px){.stats-grid{grid-template-columns:repeat(2,1fr);}}
+@media(max-width:700px){
+  .topnav{padding:0 16px;} .wrapper{padding:24px 16px 40px;}
+  .stats-grid{grid-template-columns:1fr 1fr;}
+  .form-row{flex-direction:column;align-items:stretch;}
+  .form-input,.form-input.search{min-width:0;width:100%;}
+}
+</style>
+</head>
+<body>
+
+<!-- LOADING OVERLAY -->
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="spinner"></div>
+  <div class="loading-text">Pulling Historical Data from Devices...</div>
+  <div class="loading-sub">This may take a few minutes. Please wait.</div>
+</div>
+
+<nav class="topnav">
+  <div class="nav-left">
+    <div class="nav-brand"><span class="nav-brand-dot"></span>ATTENDANCE</div>
+    <a href="/" class="nav-link">Auto</a>
+    <a href="/live/" class="nav-link live-link">&#9679; Live</a>
+    <a href="/records/" class="nav-link">Records</a>
+    <a href="/backup/" class="nav-link">Backup</a>
+    <a href="/back-data/" class="nav-link active">Back Data</a>
+  </div>
+  <span class="nav-clock" id="nav-clock">--:--:--</span>
+</nav>
+
+<div class="wrapper">
+
+  <!-- PAGE HEADER -->
+  <div class="page-header">
+    <div>
+      <div class="page-badge"><i class="fa fa-history"></i>&nbsp;Back Data</div>
+      <h1 class="page-title">Historical Attendance</h1>
+      <div class="page-sub">Pull historical attendance records from ZK devices for any date range</div>
+    </div>
+  </div>
+
+  <!-- STATS -->
+  <div class="stats-grid">
+    <div class="stat-card total">
+      <div class="stat-icon si-blue"><i class="fa fa-list-alt"></i></div>
+      <div><div class="stat-val" style="color:var(--blue);">{{ stats.total }}</div><div class="stat-lbl">Total Records</div></div>
+    </div>
+    <div class="stat-card cin">
+      <div class="stat-icon si-green"><i class="fa fa-sign-in"></i></div>
+      <div><div class="stat-val" style="color:var(--green);">{{ stats.check_in }}</div><div class="stat-lbl">Check-In</div></div>
+    </div>
+    <div class="stat-card cout">
+      <div class="stat-icon si-red"><i class="fa fa-sign-out"></i></div>
+      <div><div class="stat-val" style="color:var(--red);">{{ stats.check_out }}</div><div class="stat-lbl">Check-Out</div></div>
+    </div>
+    <div class="stat-card uniq">
+      <div class="stat-icon si-gold"><i class="fa fa-users"></i></div>
+      <div><div class="stat-val" style="color:var(--gold);">{{ stats.unique }}</div><div class="stat-lbl">Unique Players</div></div>
+    </div>
+  </div>
+
+  {% if pull_error %}
+  <div class="alert-err"><i class="fa fa-exclamation-circle"></i> {{ pull_error }}</div>
+  {% endif %}
+
+  <!-- PULL RESULT -->
+  {% if pull_result %}
+  <div class="pull-result {% if pull_result.error %}error{% elif pull_result.total_saved > 0 %}success{% else %}warning{% endif %}">
+    {% if pull_result.error %}
+      <div class="pr-title"><i class="fa fa-times-circle"></i> Pull Failed: {{ pull_result.error }}</div>
+    {% else %}
+      <div class="pr-title">
+        <i class="fa fa-check-circle"></i>
+        Pull Complete &mdash; {{ pull_result.total_saved }} new record{{ pull_result.total_saved|pluralize }} saved
+        &nbsp;&middot;&nbsp; {{ pull_result.from_date }} to {{ pull_result.to_date }}
+        &nbsp;&middot;&nbsp; {{ pull_result.timestamp }}
+      </div>
+      <div class="pr-chips">
+        {% for r in pull_result.results %}
+          {% if r.status == 'ok' %}
+          <span class="pr-chip ok">
+            <i class="fa fa-check"></i>
+            {{ r.name|default:r.ip }} &mdash; +{{ r.saved }} new, {{ r.skipped }} already existed
+          </span>
+          {% else %}
+          <span class="pr-chip err">
+            <i class="fa fa-times"></i>
+            {{ r.name|default:r.ip }} &mdash; {{ r.error }}
+          </span>
+          {% endif %}
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- PULL FORM (POST) -->
+  <div class="pull-form-card">
+    <div class="pull-form-title"><i class="fa fa-download"></i> Pull Data from Devices</div>
+    <form method="post" id="pullForm" onsubmit="showLoading()">
+      {% csrf_token %}
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label"><i class="fa fa-calendar"></i> From Date</label>
+          <input type="date" name="from_date" class="form-input" value="{{ from_date }}" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label"><i class="fa fa-calendar"></i> To Date</label>
+          <input type="date" name="to_date" class="form-input" value="{{ to_date }}" required>
+        </div>
+        <div class="form-group" style="justify-content:flex-end;">
+          <label class="form-label">&nbsp;</label>
+          <button type="submit" class="btn btn-pull" id="pullBtn">
+            <i class="fa fa-download"></i> Pull from Devices
+          </button>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <!-- VIEW FILTER (GET) -->
+  <form method="get" action="">
+  <div class="toolbar">
+    <span style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase;white-space:nowrap;"><i class="fa fa-filter"></i> Filter Records</span>
+    <input type="date" name="from_date" class="form-input" value="{{ from_date }}" style="min-width:150px;background:rgba(255,255,255,.06);border:1px solid var(--border);color:var(--text);padding:9px 14px;border-radius:var(--radius-sm);font-size:13px;outline:none;">
+    <input type="date" name="to_date"   class="form-input" value="{{ to_date }}"   style="min-width:150px;background:rgba(255,255,255,.06);border:1px solid var(--border);color:var(--text);padding:9px 14px;border-radius:var(--radius-sm);font-size:13px;outline:none;">
+    <input type="text" name="search" class="form-input search" placeholder="Name, Reg No, Squad, ID..." value="{{ search }}" style="min-width:220px;background:rgba(255,255,255,.06);border:1px solid var(--border);color:var(--text);padding:9px 14px;border-radius:var(--radius-sm);font-size:13px;outline:none;">
+    <button type="submit" class="btn btn-view"><i class="fa fa-search"></i> View Records</button>
+    <a href="/back-data/" class="btn btn-ghost"><i class="fa fa-times"></i> Clear</a>
+    <div style="flex:1;"></div>
+    <span class="rec-count"><i class="fa fa-database"></i>&nbsp;{{ records|length }} records</span>
+  </div>
+  </form>
+
+  <!-- TABLE -->
+  <div class="table-card">
+    {% if records %}
+    <div class="table-wrap">
+    <table class="at">
+      <thead>
+        <tr>
+          <th style="width:40px;">#</th>
+          <th>Player</th>
+          <th>Batch / Squad</th>
+          <th>Date</th>
+          <th>Time</th>
+          <th>Status</th>
+          <th>API</th>
+          <th>Device</th>
+          <th>ID</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for r in records %}
+      <tr>
+        <td><div class="row-num">{{ forloop.counter }}</div></td>
+
+        <td>
+          <div class="td-name">{{ r.full_name|default:"Unknown" }}</div>
+          {% if r.reg_no %}<span class="td-reg">{{ r.reg_no }}</span>{% endif %}
+        </td>
+
+        <td>
+          {% if r.squad %}
+          <span class="td-squad">{{ r.squad }}</span>
+          {% else %}<span style="color:var(--muted);font-size:12px;">—</span>{% endif %}
+        </td>
+
+        <td><div class="td-date">{{ r.date_only }}</div></td>
+
+        <td><div class="td-time">{{ r.time_only }}</div></td>
+
+        <td>
+          {% if r.status == 0 %}
+          <span class="badge badge-in"><i class="fa fa-arrow-down"></i> Check-In</span>
+          {% elif r.status == 1 %}
+          <span class="badge badge-out"><i class="fa fa-arrow-up"></i> Check-Out</span>
+          {% else %}
+          <span class="badge badge-other">{{ r.status_label }}</span>
+          {% endif %}
+        </td>
+
+        <td>
+          {% if r.api_status == 'sent' %}
+          <span class="api-badge api-sent"><i class="fa fa-check"></i> Sent</span>
+          {% elif r.api_status == 'failed' %}
+          <span class="api-badge api-failed" title="{{ r.api_reason }}"><i class="fa fa-times"></i> Failed</span>
+          {% elif r.api_status == 'duplicate' %}
+          <span class="api-badge api-dup"><i class="fa fa-minus"></i> Dup</span>
+          {% else %}
+          <span class="api-badge api-pending"><i class="fa fa-clock-o"></i> {{ r.api_status|default:"pending" }}</span>
+          {% endif %}
+        </td>
+
+        <td><span class="td-device">{{ r.device_name|default:"—" }}</span></td>
+
+        <td><span class="td-id">{{ r.user_id }}</span></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <div class="table-footer">
+      <span class="tf-info">{{ records|length }} record{{ records|length|pluralize }} &mdash; {{ from_date }} to {{ to_date }}</span>
+      <span class="tf-info">ZK Biometrics</span>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <span class="es-icon">&#128202;</span>
+      <div class="es-title">No Records Found</div>
+      <div class="es-sub">
+        No attendance records found between <strong>{{ from_date }}</strong> and <strong>{{ to_date }}</strong>.<br>
+        Use the <strong>Pull from Devices</strong> button above to fetch historical data,<br>
+        or adjust the date range filter.
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+</div>
+
+<script>
+(function tick(){
+  var n=new Date(),h=String(n.getHours()).padStart(2,'0'),
+  m=String(n.getMinutes()).padStart(2,'0'),s=String(n.getSeconds()).padStart(2,'0');
+  document.getElementById('nav-clock').textContent=h+':'+m+':'+s;
+  setTimeout(tick,1000);
+})();
+
+function showLoading(){
+  document.getElementById('loadingOverlay').classList.add('show');
+  document.getElementById('pullBtn').disabled = true;
+}
+</script>
+</body>
+</html>
