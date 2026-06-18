@@ -1,0 +1,7 @@
+Change Databse:
+	machine\setting.py 
+	and where you can change database
+
+Change tables name:
+	userdata\views
+	after opening you find attendance_table and Device_table just change it 

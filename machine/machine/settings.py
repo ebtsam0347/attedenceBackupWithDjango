@@ -11,7 +11,7 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 from pathlib import Path
 import os
-
+from config import *
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -72,10 +72,11 @@ WSGI_APPLICATION = 'machine.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'mssql',
-        'NAME': 'WebHRMS',
-        'USER': 'ajax',
-        'PASSWORD': 'Forward@123',
-        'HOST': '10.10.100.4',
+        'NAME': 'Sialkot_Accadmy',
+        # 'USER': 'ajax',
+        # 'PASSWORD': 'Forward@123',
+        'HOST': 'ITS-14',
+        # 'HOST': 'webserver',
         # 'PORT': '',
        'OPTIONS': {
            'driver': 'ODBC Driver 17 for SQL Server',
@@ -103,7 +104,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Karachi'
 
 USE_I18N = True
 
