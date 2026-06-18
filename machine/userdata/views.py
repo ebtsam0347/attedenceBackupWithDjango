@@ -852,6 +852,78 @@ def api_test_push(request):
     return JsonResponse(results, json_dumps_params={'indent': 2})
 
 
+def devices_page(request):
+    msg = ''
+    msg_type = ''
+
+    if request.method == 'POST':
+        action = request.POST.get('action')
+
+        if action == 'add':
+            name = request.POST.get('DeviceName', '').strip()
+            ip   = request.POST.get('DeviceIp',   '').strip()
+            port = request.POST.get('Port', '4370').strip() or '4370'
+            loc  = request.POST.get('Location',   '').strip()
+            if not name or not ip:
+                msg, msg_type = 'Device name aur IP required hain.', 'error'
+            else:
+                try:
+                    PayRoll_payroll_deviceinfo.objects.create(
+                        DeviceName=name, DeviceIp=ip,
+                        Port=int(port), Location=loc, IsActive=True
+                    )
+                    msg, msg_type = f'Device "{name}" add ho gaya.', 'success'
+                except Exception as e:
+                    msg, msg_type = f'Error: {e}', 'error'
+
+        elif action == 'delete':
+            did = request.POST.get('device_id')
+            try:
+                dev = PayRoll_payroll_deviceinfo.objects.get(pk=did)
+                dev.delete()
+                msg, msg_type = 'Device delete ho gaya.', 'success'
+            except Exception as e:
+                msg, msg_type = f'Error: {e}', 'error'
+
+        elif action == 'toggle':
+            did = request.POST.get('device_id')
+            try:
+                dev = PayRoll_payroll_deviceinfo.objects.get(pk=did)
+                dev.IsActive = not dev.IsActive
+                dev.save(update_fields=['IsActive'])
+                state = 'Active' if dev.IsActive else 'Inactive'
+                msg, msg_type = f'Device "{dev.DeviceName}" ab {state} hai.', 'success'
+            except Exception as e:
+                msg, msg_type = f'Error: {e}', 'error'
+
+        elif action == 'edit':
+            did  = request.POST.get('device_id')
+            name = request.POST.get('DeviceName', '').strip()
+            ip   = request.POST.get('DeviceIp',   '').strip()
+            port = request.POST.get('Port', '4370').strip() or '4370'
+            loc  = request.POST.get('Location',   '').strip()
+            if not name or not ip:
+                msg, msg_type = 'Device name aur IP required hain.', 'error'
+            else:
+                try:
+                    dev = PayRoll_payroll_deviceinfo.objects.get(pk=did)
+                    dev.DeviceName = name
+                    dev.DeviceIp   = ip
+                    dev.Port       = int(port)
+                    dev.Location   = loc
+                    dev.save(update_fields=['DeviceName', 'DeviceIp', 'Port', 'Location'])
+                    msg, msg_type = f'Device "{name}" update ho gaya.', 'success'
+                except Exception as e:
+                    msg, msg_type = f'Error: {e}', 'error'
+
+    devices = PayRoll_payroll_deviceinfo.objects.all().order_by('DeviceName')
+    return render(request, 'userdata/devices.html', {
+        'devices':  devices,
+        'msg':      msg,
+        'msg_type': msg_type,
+    })
+
+
 def userdata(request):
     if request.method == 'POST':
         date = request.POST.get('date')
