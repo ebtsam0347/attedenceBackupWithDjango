@@ -1,0 +1,233 @@
+{% extends "userdata/base.html" %}
+{% load static %}
+{% block content %}
+<!-- Display messages -->
+
+    <div id="preloader">
+      <img src="{% static "userdata/img/preloader.gif" %}" alt="Preloader">
+  </div>
+
+  <header id="navigation" class="navbar-fixed-top navbar">
+    <div class="container">
+        <div class="navbar-header">
+            <!-- responsive nav button -->
+            <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-collapse">
+                <span class="sr-only">Toggle navigation</span>
+                <i class="fa fa-bars fa-2x"></i>
+            </button>
+          
+
+           
+        </div>
+
+        <!-- main nav -->
+        <nav class="collapse navbar-collapse navbar-right" role="navigation">
+            <ul id="nav" class="nav navbar-nav">
+                <li class="current"><a href="#body">Home</a></li>
+                {% comment %} <li><a href="#features">Features</a></li> {% endcomment %}
+                <li><a href="#works">Reasults</a></li>
+                {% comment %} <li><a href="#team">Team</a></li>
+                <li><a href="http://google.com">Contact</a></li> {% endcomment %}
+            </ul>
+        </nav>
+        <!-- /main nav -->
+
+    </div>
+</header>
+  <section id="slider">
+      <div id="carousel-example-generic" class="carousel slide" data-ride="carousel">
+
+          <!-- Indicators bullet -->
+          <ol class="carousel-indicators">
+              <li data-target="#carousel-example-generic" data-slide-to="0" class="active"></li>
+          </ol>
+          <!-- End Indicators bullet -->
+
+          <!-- Wrapper for slides -->
+          <div class="carousel-inner" role="listbox">
+
+              <!-- single slide -->
+              <div class="item active" style="background-image: url({% static "userdata/img/banner.jpg" %});">
+                  <div class="carousel-caption">
+                      <h2 data-wow-duration="700ms" data-wow-delay="500ms" class="wow bounceInDown animated">
+                        USER<span>  ATTENDANCE DATA</span>!</h2>
+                      <h3 data-wow-duration="1000ms" class="wow slideInLeft animated"><span
+                              class="color">Backup</span>.</h3>
+                      <p data-wow-duration="1000ms" class="wow slideInRight animated">Select date form the form and then start
+                      </p>
+
+                    <div class="frmcontainer">
+                      {% if messages %}
+                      <ul class="messages">
+                        {% for message in messages %}
+                          <li{% if message.tags %} class="alert alert-primary"{% endif %}>{{ message }}</li>
+                        {% endfor %}
+                      </ul>
+                    {% endif %}
+                        <form action="" method="post">
+                            {% csrf_token %}
+                            <div class="form-group"> 
+                                <label for="date">Enter date:</label>
+                                <input type="date" name="date" id="date" class="form-control">
+                                    <button type="submit" class=" button text">Start</button> 
+                                <div class="progress-bar"></div>
+                                <svg x="0px" y="0px"
+                                   viewBox="0 0 25 30" style="enable-background:new 0 0 25 30;">
+                                  <path class="check" class="st0" d="M2,19.2C5.9,23.6,9.4,28,9.4,28L23,2"/>
+                                </svg> 
+                            </div>
+                            </form>
+
+                        </div>
+                  </div>
+              </div>
+              <!-- end single slide -->
+          </div>
+          <!-- End Wrapper for slides -->
+      </div>
+  </section>
+
+  <!--
+      End Home SliderEnd
+      ==================================== -->
+
+{% comment %} 
+  <section id="features" class="features">
+      <div class="container">
+          <div class="row">
+
+              <div class="sec-title text-center mb50 wow bounceInDown animated" data-wow-duration="500ms">
+                  <h2>Features</h2>
+                  <div class="devider"><i class="fa fa-heart-o fa-lg"></i></div>
+              </div>
+
+              <!-- service item -->
+              <div class="col-md-4 wow fadeInLeft" data-wow-duration="500ms">
+                  <div class="service-item">
+                      <div class="service-icon">
+                          <i class="fa fa-github fa-2x"></i>
+                      </div>
+
+                      <div class="service-desc">
+                          <h3>Branding</h3>
+                          <p>Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque
+                              laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore</p>
+                      </div>
+                  </div>
+              </div>
+              <!-- end service item -->
+
+              <!-- service item -->
+              <div class="col-md-4 wow fadeInUp" data-wow-duration="500ms" data-wow-delay="500ms">
+                  <div class="service-item">
+                      <div class="service-icon">
+                          <i class="fa fa-pencil fa-2x"></i>
+                      </div>
+
+                      <div class="service-desc">
+                          <h3>Development</h3>
+                          <p>Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque
+                              laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore</p>
+                      </div>
+                  </div>
+              </div>
+              <!-- end service item -->
+
+              <!-- service item -->
+              <div class="col-md-4 wow fadeInRight" data-wow-duration="500ms" data-wow-delay="900ms">
+                  <div class="service-item">
+                      <div class="service-icon">
+                          <i class="fa fa-bullhorn fa-2x"></i>
+                      </div>
+
+                      <div class="service-desc">
+                          <h3>Consulting</h3>
+                          <p>Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque
+                              laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore</p>
+                      </div>
+                  </div>
+              </div>
+              <!-- end service item -->
+
+          </div>
+      </div>
+  </section> {% endcomment %}
+
+  <!--
+      End Features
+      ==================================== -->
+
+      <section id="works" class="works clearfix">
+        <div class="container">
+            <div class="row">
+
+                <div class="sec-title text-center">
+                    <h2>Reasult</h2>
+                    <div class="devider"><i class="fa fa-heart-o fa-lg"></i></div>
+                </div>
+
+                <div class="work-filter wow fadeInRight animated" data-wow-duration="500ms">
+                    <div class="text-center">
+                        {% if device_list_with_ip %}
+                        <div class="container mt-4">
+                            <h4 class="sec-sub-title text-center">Data is successfully loaded in that devices </h4>
+                          <table class="table table-bordered">
+                            <thead class="thead-dark">
+                              <tr>
+                                <th>Device IP</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {% for device_ip in device_list_with_ip %}
+                                <tr>
+                                  <td>{{ device_ip }}</td>
+                                </tr>
+                              {% endfor %}
+                            </tbody>
+                          </table>
+                        </div>
+                      {% else %}
+                        <p class="mt-4 sec-sub-title text-center">No devices success found.</p>
+                      {% endif %}
+
+                      {% if device_list_with_ip_error %}
+                        <div class="container mt-4">
+                            <h4 class="sec-sub-title text-center">Errors data is not loaded in that devices</h4>
+                          <table class="table table-bordered">
+                            <thead class="thead-dark">
+                              <tr>
+                                <th>Device IP</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {% for device_ip in device_list_with_ip_error %}
+                                <tr>
+                                  <td>{{ device_ip }}</td>
+                                </tr>
+                              {% endfor %}
+                            </tbody>
+                          </table>
+                        </div>
+                      {% else %}
+                        <p class="mt-4 sec-sub-title text-center">No Error devices found.</p>
+                      {% endif %}
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        
+        <script>
+            
+            var currentDate = new Date().toISOString().split('T')[0];
+            
+            // Set the maximum date for the input element
+            document.getElementById('date').setAttribute('max', currentDate);
+          </script>
+
+    </section>
+
+    
+  {% endblock content %}
+   
