@@ -1,0 +1,355 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Auto Attendance — SFA</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{
+  --bg:#080b14;
+  --surface:rgba(255,255,255,.04);
+  --border:rgba(255,255,255,.08);
+  --text:#eef0f6;
+  --muted:rgba(255,255,255,.38);
+  --muted2:rgba(255,255,255,.55);
+  --green:#2ecc71; --green-d:rgba(46,204,113,.14); --green-b:rgba(46,204,113,.35);
+  --red:#e74c3c;   --red-d:rgba(231,76,60,.14);    --red-b:rgba(231,76,60,.35);
+  --blue:#4361ee;  --blue-d:rgba(67,97,238,.18);   --blue-b:rgba(67,97,238,.4);
+  --gold:#f59e0b;  --gold-d:rgba(245,158,11,.14);
+  --radius:14px; --radius-sm:8px;
+}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,Arial,sans-serif;min-height:100vh;}
+body::before{content:'';position:fixed;top:-200px;left:-200px;width:700px;height:700px;border-radius:50%;background:radial-gradient(circle,rgba(67,97,238,.1) 0%,transparent 70%);pointer-events:none;z-index:0;}
+
+/* NAV */
+.topnav{height:56px;background:rgba(8,11,20,.8);backdrop-filter:blur(20px);position:sticky;top:0;z-index:200;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 28px;}
+.nav-brand{font-size:13px;font-weight:800;letter-spacing:.5px;display:flex;align-items:center;gap:8px;}
+.nav-dot{width:8px;height:8px;border-radius:50%;background:linear-gradient(135deg,var(--blue),#7c3aed);}
+.nav-links{display:flex;align-items:center;gap:4px;}
+.nav-link{font-size:12px;color:var(--muted);text-decoration:none;padding:5px 12px;border-radius:6px;transition:.2s;font-weight:500;}
+.nav-link:hover{color:var(--text);background:rgba(255,255,255,.06);}
+.nav-link.active{color:#fff;background:var(--blue-d);border:1px solid var(--blue-b);}
+.nav-clock{font-family:monospace;font-size:12px;color:var(--muted);background:var(--surface);border:1px solid var(--border);padding:4px 12px;border-radius:20px;}
+
+/* WRAPPER */
+.wrap{max-width:1200px;margin:0 auto;padding:28px 28px 60px;position:relative;z-index:1;}
+
+/* STATUS BAR */
+.status-bar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:var(--radius);padding:14px 20px;margin-bottom:20px;}
+.sb-left{display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+.sb-title{font-size:11px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);}
+.sb-right{display:flex;align-items:center;gap:10px;}
+
+/* COUNTDOWN */
+.countdown-box{display:flex;align-items:center;gap:8px;background:var(--blue-d);border:1px solid var(--blue-b);padding:6px 16px;border-radius:20px;}
+.cd-label{font-size:10px;font-weight:700;letter-spacing:1px;color:rgba(100,130,255,.7);text-transform:uppercase;}
+.cd-timer{font-family:monospace;font-size:14px;font-weight:800;color:#7aa7ff;letter-spacing:1px;}
+
+/* PULL STATUS BADGE */
+.pull-status{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:600;padding:5px 14px;border-radius:20px;transition:.3s;}
+.pull-status.idle {background:rgba(255,255,255,.05);border:1px solid var(--border);color:var(--muted);}
+.pull-status.pulling{background:var(--gold-d);border:1px solid rgba(245,158,11,.3);color:var(--gold);}
+.pull-status.ok    {background:var(--green-d);border:1px solid var(--green-b);color:var(--green);}
+.pull-status.err   {background:var(--red-d);  border:1px solid var(--red-b);  color:var(--red);}
+.spin{display:inline-block;animation:spin .8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* DEVICE CHIPS */
+.device-chips{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:20px;}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:20px;font-size:11px;font-weight:600;}
+.chip.ok {background:var(--green-d);border:1px solid var(--green-b);color:var(--green);}
+.chip.err{background:var(--red-d);  border:1px solid var(--red-b);  color:var(--red);}
+.chip.wait{background:var(--surface);border:1px solid var(--border);color:var(--muted);}
+.chip-dot{width:6px;height:6px;border-radius:50%;background:currentColor;}
+
+/* TABLE HEADER */
+.table-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
+.tbl-title{font-size:14px;font-weight:800;display:flex;align-items:center;gap:8px;}
+.tbl-count{font-size:11px;font-weight:700;padding:3px 12px;border-radius:20px;background:var(--blue-d);border:1px solid var(--blue-b);color:#7aa7ff;}
+.last-pull{font-size:11px;color:var(--muted);}
+
+/* TABLE */
+.tbl-wrap{background:rgba(255,255,255,.025);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;}
+table{width:100%;border-collapse:collapse;}
+thead th{padding:11px 16px;font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);text-align:left;border-bottom:1px solid var(--border);background:rgba(255,255,255,.02);white-space:nowrap;}
+tbody td{padding:11px 16px;font-size:13px;border-bottom:1px solid rgba(255,255,255,.04);vertical-align:middle;}
+tbody tr:last-child td{border-bottom:none;}
+tbody tr{transition:.15s;}
+tbody tr:hover{background:rgba(255,255,255,.03);}
+tbody tr.new-row{animation:rowIn .4s ease-out;}
+@keyframes rowIn{from{background:rgba(67,97,238,.12);opacity:0}to{opacity:1}}
+
+.td-num{color:var(--muted);font-size:11px;font-family:monospace;width:36px;}
+.td-name{font-weight:700;}
+.td-reg{font-size:11px;color:rgba(100,160,255,.7);font-family:monospace;}
+.td-squad{font-size:12px;color:var(--muted2);}
+.td-time{font-family:monospace;font-size:12px;color:rgba(255,255,255,.6);}
+.td-device{font-size:11px;color:var(--muted);}
+
+.status-badge{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;font-size:10px;font-weight:700;letter-spacing:.5px;}
+.s-in {background:var(--green-d);border:1px solid var(--green-b);color:var(--green);}
+.s-out{background:var(--red-d);  border:1px solid var(--red-b);  color:var(--red);}
+.s-oth{background:var(--gold-d); border:1px solid rgba(245,158,11,.3);color:var(--gold);}
+
+.empty-row td{text-align:center;padding:48px;color:var(--muted);font-size:13px;}
+
+/* SUMMARY PILLS */
+.summary-pills{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px;}
+.pill{display:flex;align-items:center;gap:10px;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 18px;}
+.pill-val{font-size:22px;font-weight:800;line-height:1;}
+.pill-lbl{font-size:10px;color:var(--muted);margin-top:2px;font-weight:500;white-space:nowrap;}
+.pill-icon{font-size:20px;opacity:.6;}
+</style>
+</head>
+<body>
+
+<nav class="topnav">
+  <div style="display:flex;align-items:center;gap:16px;">
+    <div class="nav-brand"><span class="nav-dot"></span>ATTENDANCE</div>
+    <div class="nav-links">
+      <a href="/" class="nav-link active">Auto</a>
+      <a href="/live/" class="nav-link">&#9679; Live</a>
+      <a href="/records/" class="nav-link">Records</a>
+      <a href="/backup/" class="nav-link">Backup</a>
+      <a href="/back-data/" class="nav-link">Back Data</a>
+    </div>
+  </div>
+  <span class="nav-clock" id="nav-clock">--:--:--</span>
+</nav>
+
+<div class="wrap">
+
+  <!-- STATUS BAR -->
+  <div class="status-bar">
+    <div class="sb-left">
+      <span class="sb-title">Auto Attendance</span>
+      <span class="pull-status idle" id="pullStatus">&#9675; Waiting</span>
+      <span class="last-pull" id="lastPullText"></span>
+    </div>
+    <div class="sb-right">
+      <div class="countdown-box">
+        <span class="cd-label">Next Pull</span>
+        <span class="cd-timer" id="cdTimer">5:00</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- DEVICE CHIPS -->
+  <div class="device-chips" id="deviceChips">
+    <span class="chip wait"><span class="chip-dot"></span>Waiting for first pull...</span>
+  </div>
+
+  <!-- SUMMARY -->
+  <div class="summary-pills">
+    <div class="pill">
+      <span class="pill-icon">&#128203;</span>
+      <div>
+        <div class="pill-val" id="totalCount" style="color:var(--text);">0</div>
+        <div class="pill-lbl">Total Records Today</div>
+      </div>
+    </div>
+    <div class="pill">
+      <span class="pill-icon">&#9989;</span>
+      <div>
+        <div class="pill-val" id="checkInCount" style="color:var(--green);">0</div>
+        <div class="pill-lbl">Check-In</div>
+      </div>
+    </div>
+    <div class="pill">
+      <span class="pill-icon">&#128683;</span>
+      <div>
+        <div class="pill-val" id="checkOutCount" style="color:var(--red);">0</div>
+        <div class="pill-lbl">Check-Out</div>
+      </div>
+    </div>
+    <div class="pill">
+      <span class="pill-icon">&#128100;</span>
+      <div>
+        <div class="pill-val" id="uniqueCount" style="color:#7aa7ff;">0</div>
+        <div class="pill-lbl">Unique Players</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TABLE -->
+  <div class="table-header">
+    <div class="tbl-title">
+      &#9632; Today's Attendance
+      <span class="tbl-count" id="tblCount">0 records</span>
+    </div>
+  </div>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Name</th>
+          <th>Reg / ID</th>
+          <th>Squad / Batch</th>
+          <th>Time</th>
+          <th>Status</th>
+          <th>Device</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody">
+        <tr class="empty-row"><td colspan="7">&#9632; Loading attendance data...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+<script>
+var PULL_INTERVAL = 5 * 60; // seconds
+var countdown = PULL_INTERVAL;
+var pulling = false;
+
+/* CLOCK */
+(function tick(){
+  var n = new Date();
+  document.getElementById('nav-clock').textContent =
+    String(n.getHours()).padStart(2,'0') + ':' +
+    String(n.getMinutes()).padStart(2,'0') + ':' +
+    String(n.getSeconds()).padStart(2,'0');
+  setTimeout(tick, 1000);
+})();
+
+/* COUNTDOWN */
+function fmtCountdown(s){
+  return Math.floor(s/60) + ':' + String(s%60).padStart(2,'0');
+}
+(function cdTick(){
+  countdown--;
+  if(countdown <= 0){
+    countdown = PULL_INTERVAL;
+    doPull();
+  }
+  document.getElementById('cdTimer').textContent = fmtCountdown(countdown);
+  setTimeout(cdTick, 1000);
+})();
+
+/* PULL STATUS UI */
+function setPullStatus(state, text){
+  var el = document.getElementById('pullStatus');
+  el.className = 'pull-status ' + state;
+  el.innerHTML = {
+    idle:    '&#9675; ' + text,
+    pulling: '<span class="spin">&#8635;</span> ' + text,
+    ok:      '&#10003; ' + text,
+    err:     '&#9888; ' + text,
+  }[state] || text;
+}
+
+/* DEVICE CHIPS */
+function renderChips(results){
+  var el = document.getElementById('deviceChips');
+  if(!results || !results.length){
+    el.innerHTML = '<span class="chip wait"><span class="chip-dot"></span>No devices found</span>';
+    return;
+  }
+  el.innerHTML = results.map(function(r){
+    var cls = r.status === 'ok' ? 'ok' : 'err';
+    var label = r.status === 'ok'
+      ? (r.name || r.ip) + ' (+' + r.saved + ' new)'
+      : (r.name || r.ip) + ' — Error';
+    return '<span class="chip ' + cls + '"><span class="chip-dot"></span>' + label + '</span>';
+  }).join('');
+}
+
+/* RENDER TABLE */
+function statusBadge(s){
+  if(s === 'Check-In')  return '<span class="status-badge s-in">&#9679; Check-In</span>';
+  if(s === 'Check-Out') return '<span class="status-badge s-out">&#9632; Check-Out</span>';
+  return '<span class="status-badge s-oth">' + s + '</span>';
+}
+
+function renderTable(records){
+  var tbody = document.getElementById('tableBody');
+  var cnt = document.getElementById('tblCount');
+
+  if(!records || !records.length){
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="7">No attendance records for today yet.</td></tr>';
+    cnt.textContent = '0 records';
+    updateSummary([]);
+    return;
+  }
+
+  cnt.textContent = records.length + ' record' + (records.length === 1 ? '' : 's');
+  updateSummary(records);
+
+  tbody.innerHTML = records.map(function(r, i){
+    return '<tr class="new-row">' +
+      '<td class="td-num">' + (i+1) + '</td>' +
+      '<td class="td-name">' + r.full_name + '</td>' +
+      '<td class="td-reg">' + (r.reg_no || ('ID:' + r.user_id)) + '</td>' +
+      '<td class="td-squad">' + (r.squad || '—') + '</td>' +
+      '<td class="td-time">' + r.time + '</td>' +
+      '<td>' + statusBadge(r.status) + '</td>' +
+      '<td class="td-device">' + (r.device_name || '—') + '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+function updateSummary(records){
+  var checkIn  = records.filter(function(r){ return r.status === 'Check-In';  }).length;
+  var checkOut = records.filter(function(r){ return r.status === 'Check-Out'; }).length;
+  var unique   = new Set(records.map(function(r){ return r.user_id; })).size;
+  document.getElementById('totalCount').textContent   = records.length;
+  document.getElementById('checkInCount').textContent  = checkIn;
+  document.getElementById('checkOutCount').textContent = checkOut;
+  document.getElementById('uniqueCount').textContent   = unique;
+}
+
+/* FETCH TODAY RECORDS */
+function fetchRecords(){
+  fetch('/api/today-records/')
+    .then(function(r){ return r.json(); })
+    .then(function(data){ renderTable(data.records); })
+    .catch(function(){ });
+}
+
+/* PULL FROM DEVICES */
+function doPull(){
+  if(pulling) return;
+  pulling = true;
+  setPullStatus('pulling', 'Pulling from devices...');
+
+  fetch('/api/auto-pull/')
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      pulling = false;
+      renderChips(data.results);
+
+      var hasErr = data.results && data.results.some(function(r){ return r.status === 'error'; });
+      var allErr = data.results && data.results.length > 0 && data.results.every(function(r){ return r.status === 'error'; });
+
+      if(data.error && !data.results.length){
+        setPullStatus('err', data.error);
+      } else if(allErr){
+        setPullStatus('err', 'All devices failed');
+      } else {
+        setPullStatus('ok', 'Pulled at ' + (data.timestamp || '--'));
+        document.getElementById('lastPullText').textContent = 'Last pull: ' + (data.timestamp || '--') + ' · ' + (data.total_saved || 0) + ' new records';
+      }
+
+      countdown = PULL_INTERVAL;
+      fetchRecords();
+    })
+    .catch(function(e){
+      pulling = false;
+      setPullStatus('err', 'Connection failed');
+      countdown = PULL_INTERVAL;
+    });
+}
+
+/* START */
+window.addEventListener('load', function(){
+  fetchRecords();   // show existing data immediately
+  setTimeout(doPull, 800); // first pull shortly after load
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,749 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SFA — Live Attendance</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+
+:root{
+  --cyan:#00ffff;
+  --cyan2:#00e5ff;
+  --green:#00ff80;
+  --red:#ff4444;
+  --gold:#ffd54f;
+  --gold-glow:#ffcc00;
+  --bg:#030814;
+  --panel:rgba(5,18,40,.85);
+}
+
+body{
+  font-family:'Rajdhani',sans-serif;
+  background:var(--bg);
+  color:#fff;
+  overflow:hidden;
+  height:100vh;
+}
+
+body::before{
+  content:'';position:fixed;inset:0;
+  background-image:
+    linear-gradient(rgba(0,255,255,.05) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(0,255,255,.05) 1px,transparent 1px);
+  background-size:50px 50px;
+  pointer-events:none;z-index:0;
+}
+body::after{
+  content:'';position:fixed;
+  top:50%;left:50%;transform:translate(-50%,-50%);
+  width:120vw;height:120vh;
+  background:radial-gradient(ellipse at center,rgba(0,100,180,.18) 0%,transparent 65%);
+  pointer-events:none;z-index:0;
+}
+
+.container{
+  width:100vw;height:100vh;
+  padding:16px 20px;
+  position:relative;z-index:1;
+  display:flex;flex-direction:column;gap:14px;
+}
+
+/* ── CORNERS ── */
+.corner{position:fixed;width:60px;height:60px;}
+.corner-tl{top:10px;left:10px;border-top:2px solid var(--cyan);border-left:2px solid var(--cyan);}
+.corner-tr{top:10px;right:10px;border-top:2px solid var(--cyan);border-right:2px solid var(--cyan);}
+.corner-bl{bottom:10px;left:10px;border-bottom:2px solid var(--cyan);border-left:2px solid var(--cyan);}
+.corner-br{bottom:10px;right:10px;border-bottom:2px solid var(--cyan);border-right:2px solid var(--cyan);}
+
+/* ── HEADER ── */
+.header{
+  display:flex;justify-content:space-between;align-items:center;
+  flex-shrink:0;
+  background:rgba(0,20,50,.5);
+  border:1px solid rgba(0,255,255,.15);
+  border-radius:16px;
+  padding:10px 20px;
+  backdrop-filter:blur(10px);
+}
+
+.brand{display:flex;align-items:center;gap:16px;}
+.logo-wrap{
+  width:72px;height:72px;border-radius:50%;
+  border:2px solid var(--gold-glow);
+  box-shadow:0 0 18px var(--gold-glow),0 0 40px rgba(255,204,0,.25);
+  overflow:hidden;flex-shrink:0;background:#061020;
+  display:flex;align-items:center;justify-content:center;
+}
+.logo-wrap img{width:100%;height:100%;object-fit:contain;}
+.brand-text h1{
+  font-family:'Orbitron',sans-serif;
+  font-size:clamp(15px,2.2vw,28px);font-weight:800;
+  color:var(--gold);text-shadow:0 0 18px var(--gold-glow);
+  letter-spacing:1px;line-height:1.2;
+}
+.brand-text p{color:#88ffff;font-size:clamp(9px,.9vw,12px);letter-spacing:2px;margin-top:3px;}
+
+/* ── SYSTEM STATUS (header-center) ── */
+.header-center{text-align:center;min-width:200px;}
+
+.sys-badge{
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  font-family:'Orbitron',sans-serif;
+  font-size:clamp(11px,1.4vw,18px);font-weight:700;
+  letter-spacing:1px;
+  color:var(--green);
+  text-shadow:0 0 12px currentColor;
+  margin-bottom:6px;
+  transition:color .4s,text-shadow .4s;
+}
+.pulse-dot{
+  width:10px;height:10px;border-radius:50%;
+  background:currentColor;box-shadow:0 0 10px currentColor;
+  animation:pulse 1.4s ease-in-out infinite;
+  flex-shrink:0;
+}
+.pulse-dot.fast{animation-duration:.6s;}
+
+#conn-label{
+  display:block;font-size:11px;
+  color:rgba(0,255,255,.6);letter-spacing:1px;
+  margin-bottom:3px;
+  min-height:16px;
+}
+#dev-label{
+  display:block;font-size:10px;
+  color:rgba(0,255,255,.35);letter-spacing:1px;
+  font-family:'Orbitron',sans-serif;
+  min-height:14px;
+}
+
+/* device chip row */
+#dev-chips{
+  display:flex;flex-wrap:wrap;justify-content:center;gap:4px;
+  margin-top:4px;min-height:18px;
+}
+.dev-chip{
+  display:inline-flex;align-items:center;gap:4px;
+  font-family:'Orbitron',sans-serif;font-size:9px;font-weight:700;
+  letter-spacing:.5px;padding:2px 8px;border-radius:20px;
+  transition:background .3s,border-color .3s,color .3s;
+}
+.dev-chip.state-connected{
+  background:rgba(0,255,128,.1);border:1px solid rgba(0,255,128,.35);
+  color:var(--green);
+}
+.dev-chip.state-reconnecting{
+  background:rgba(255,213,79,.08);border:1px solid rgba(255,213,79,.3);
+  color:var(--gold);
+}
+.dev-chip.state-error{
+  background:rgba(255,68,68,.1);border:1px solid rgba(255,68,68,.3);
+  color:var(--red);
+}
+.dev-chip.state-connecting{
+  background:rgba(0,229,255,.08);border:1px solid rgba(0,229,255,.25);
+  color:var(--cyan2);
+}
+.chip-dot{width:6px;height:6px;border-radius:50%;background:currentColor;}
+
+@keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.4);opacity:.5}}
+
+/* ── CLOCK ── */
+.clock{text-align:right;}
+#date{color:#8cfbff;font-size:11px;letter-spacing:1px;margin-bottom:6px;}
+#time{
+  font-family:'Orbitron',sans-serif;
+  font-size:clamp(22px,3vw,38px);font-weight:700;
+  color:var(--cyan);text-shadow:0 0 20px var(--cyan);letter-spacing:2px;
+}
+
+/* ── MAIN GRID ── */
+.main{
+  display:grid;grid-template-columns:38% 1fr;
+  gap:16px;flex:1;min-height:0;
+}
+
+/* ── PLAYER PANEL ── */
+.player-panel{
+  border:1px solid rgba(0,229,255,.4);border-radius:20px;padding:16px;
+  box-shadow:0 0 30px rgba(0,229,255,.2),inset 0 0 30px rgba(0,229,255,.04);
+  background:var(--panel);backdrop-filter:blur(12px);
+  display:flex;flex-direction:column;gap:12px;
+  overflow:hidden;position:relative;
+}
+.player-panel::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,transparent,var(--cyan2),transparent);
+  animation:slide 3s linear infinite;
+}
+@keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}
+
+.panel-label{
+  font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;
+  letter-spacing:3px;color:rgba(0,255,255,.5);text-align:center;text-transform:uppercase;
+}
+
+.player-image{
+  flex:1;min-height:0;border-radius:14px;overflow:hidden;
+  border:2px solid rgba(0,229,255,.5);position:relative;background:#050f22;
+}
+.player-image img{width:100%;height:100%;object-fit:cover;display:block;}
+.no-photo{
+  width:100%;height:100%;display:flex;align-items:center;
+  justify-content:center;font-size:80px;opacity:.1;
+}
+.player-image::after{
+  content:'';position:absolute;left:0;width:100%;height:3px;
+  background:linear-gradient(90deg,transparent,var(--cyan),transparent);
+  box-shadow:0 0 15px var(--cyan);
+  animation:scan 3s linear infinite;opacity:.7;
+}
+@keyframes scan{0%{top:0%}100%{top:100%}}
+.player-image::before{
+  content:'';position:absolute;top:8px;left:8px;width:20px;height:20px;
+  border-top:2px solid var(--cyan);border-left:2px solid var(--cyan);z-index:2;
+}
+
+.cards{display:grid;grid-template-columns:1fr 1fr;gap:10px;flex-shrink:0;}
+.card{
+  background:rgba(0,255,255,.05);border:1px solid rgba(0,255,255,.22);
+  border-radius:14px;padding:14px 14px 12px;text-align:center;
+  transition:.3s;position:relative;overflow:hidden;
+}
+.card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(0,255,255,.5),transparent);
+}
+.card .label{
+  font-family:'Orbitron',sans-serif;font-size:10px;font-weight:700;
+  letter-spacing:2px;color:rgba(0,255,255,.55);text-transform:uppercase;
+}
+.card .value{
+  font-size:clamp(17px,2vw,28px);font-weight:800;margin-top:8px;color:#fff;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  text-shadow:0 0 14px rgba(0,255,255,.3);line-height:1.2;
+}
+
+/* ── RIGHT PANEL ── */
+.right-panel{display:flex;flex-direction:column;gap:14px;min-height:0;}
+
+/* ── STATUS BOX ── */
+.status-box{
+  flex:1;min-height:0;border:1px solid rgba(0,255,128,.4);border-radius:20px;
+  display:flex;flex-direction:column;justify-content:center;align-items:center;
+  background:rgba(0,20,10,.6);
+  box-shadow:0 0 30px rgba(0,255,128,.15),inset 0 0 40px rgba(0,255,128,.04);
+  backdrop-filter:blur(12px);padding:20px;position:relative;overflow:hidden;
+  transition:border-color .5s,box-shadow .5s,background .5s;
+}
+.status-box::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,transparent,var(--green),transparent);
+  animation:slide 2.5s linear infinite;
+}
+.status-box.state-idle{
+  border-color:rgba(0,229,255,.25);background:rgba(0,10,25,.6);
+  box-shadow:0 0 20px rgba(0,229,255,.1);
+}
+.status-box.state-idle::before{background:linear-gradient(90deg,transparent,var(--cyan2),transparent);}
+@keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+
+.status-idle-msg{
+  font-family:'Orbitron',sans-serif;
+  font-size:clamp(16px,2.2vw,28px);
+  color:var(--cyan2);text-shadow:0 0 20px var(--cyan2);
+  text-align:center;letter-spacing:2px;
+}
+.status-idle-sub{
+  margin-top:12px;font-size:13px;
+  color:rgba(0,255,255,.35);letter-spacing:1px;text-align:center;
+}
+.hex-deco{
+  position:absolute;opacity:.06;font-size:200px;
+  font-family:'Orbitron',sans-serif;font-weight:900;
+  color:var(--green);line-height:1;pointer-events:none;
+}
+.hex-deco.tl{top:-40px;left:-20px;}
+.hex-deco.br{bottom:-40px;right:-20px;}
+
+.pdc{width:100%;animation:slideUp .4s cubic-bezier(.34,1.56,.64,1);}
+.pdc-badge{
+  display:inline-flex;align-items:center;gap:8px;
+  background:rgba(0,255,128,.12);border:1px solid rgba(0,255,128,.35);
+  padding:5px 18px;border-radius:30px;
+  font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;
+  letter-spacing:2px;color:var(--green);margin-bottom:18px;
+}
+.pdc-badge .bdot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:pulse 1.2s infinite;}
+.pdc-name{
+  font-family:'Orbitron',sans-serif;
+  font-size:clamp(28px,4.5vw,60px);font-weight:900;letter-spacing:1px;
+  color:#fff;text-shadow:0 0 30px rgba(0,255,128,.6),0 0 60px rgba(0,255,128,.2);
+  line-height:1.1;text-align:center;margin-bottom:12px;
+}
+.pdc-reg{
+  font-family:'Orbitron',sans-serif;
+  font-size:clamp(14px,2vw,24px);font-weight:700;letter-spacing:3px;
+  color:var(--cyan);text-shadow:0 0 15px var(--cyan);text-align:center;margin-bottom:18px;
+}
+.pdc-row{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;}
+.pdc-chip{
+  display:inline-flex;align-items:center;gap:7px;
+  background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);
+  padding:7px 18px;border-radius:30px;
+  font-size:clamp(13px,1.5vw,18px);font-weight:600;
+  color:rgba(255,255,255,.8);letter-spacing:.5px;
+}
+.pdc-chip.gold{border-color:rgba(255,213,79,.3);color:var(--gold);}
+.pdc-time{
+  font-family:'Orbitron',sans-serif;
+  font-size:clamp(18px,2.5vw,32px);font-weight:800;letter-spacing:4px;
+  color:var(--gold);text-shadow:0 0 20px rgba(255,213,79,.5);text-align:center;
+}
+
+/* ── LOGS ── */
+.logs{
+  height:265px;flex-shrink:0;border:1px solid rgba(255,204,0,.4);
+  border-radius:20px;overflow:hidden;display:flex;flex-direction:column;
+  box-shadow:0 0 20px rgba(255,204,0,.1);background:rgba(5,10,25,.85);
+}
+.logs-header{
+  background:linear-gradient(90deg,#c49a00,#ffd54f,#c49a00);
+  color:#000;padding:10px 18px;
+  display:flex;align-items:center;justify-content:space-between;flex-shrink:0;
+}
+.logs-header-title{font-family:'Orbitron',sans-serif;font-size:12px;font-weight:800;letter-spacing:2px;}
+.logs-count{background:rgba(0,0,0,.25);padding:2px 12px;border-radius:20px;font-family:'Orbitron',sans-serif;font-size:10px;}
+.logs-body{flex:1;overflow-y:auto;}
+.logs-body::-webkit-scrollbar{width:3px;}
+.logs-body::-webkit-scrollbar-thumb{background:rgba(255,204,0,.3);border-radius:2px;}
+table{width:100%;border-collapse:collapse;}
+th{
+  background:rgba(0,10,30,.9);color:var(--cyan);padding:9px 12px;
+  font-family:'Orbitron',sans-serif;font-size:9px;letter-spacing:1.5px;font-weight:700;
+  position:sticky;top:0;z-index:1;border-bottom:1px solid rgba(0,255,255,.15);
+}
+td{padding:9px 12px;text-align:center;border-bottom:1px solid rgba(255,255,255,.05);font-size:13px;font-weight:600;}
+tbody tr{transition:.2s;}
+tbody tr:hover{background:rgba(0,255,255,.04);}
+tbody tr:first-child{animation:rowIn .35s ease-out;}
+@keyframes rowIn{from{opacity:0;background:rgba(0,255,200,.1)}to{opacity:1}}
+.empty-logs{text-align:center;padding:36px;color:rgba(0,255,255,.2);font-size:12px;letter-spacing:2px;}
+</style>
+</head>
+<body>
+
+<div class="corner corner-tl"></div>
+<div class="corner corner-tr"></div>
+<div class="corner corner-bl"></div>
+<div class="corner corner-br"></div>
+
+<div class="container">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div class="brand">
+      <div class="logo-wrap">
+        <img src="{% static 'userdata/img/logo.png' %}" alt="SFA Logo">
+      </div>
+      <div class="brand-text">
+        <h1>SIALKOT FOOTBALL ACADEMY</h1>
+        <p>REAL-TIME PLAYER ATTENDANCE MONITORING</p>
+      </div>
+    </div>
+
+    <!-- SYSTEM STATUS -->
+    <div class="header-center">
+      <div class="sys-badge" id="sysBadge">
+        <span class="pulse-dot" id="pulseDot"></span>
+        <span id="sysLabel">CONNECTING...</span>
+      </div>
+      <span id="conn-label">Initialising...</span>
+      <span id="dev-label"></span>
+      <div id="dev-chips"></div>
+    </div>
+
+    <div class="clock">
+      <div id="date"></div>
+      <div id="time">00:00:00</div>
+      <button onclick="toggleFullscreen()" style="
+        margin-top:10px;background:rgba(0,255,255,.08);
+        border:1px solid rgba(0,255,255,.3);color:var(--cyan);
+        font-family:'Orbitron',sans-serif;font-size:10px;font-weight:700;
+        letter-spacing:1.5px;padding:5px 14px;border-radius:20px;
+        cursor:pointer;transition:.2s;display:flex;align-items:center;gap:6px;margin-left:auto;">
+        <span id="fs-icon">⛶</span><span id="fs-label">FULLSCREEN</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div class="main">
+
+    <!-- LEFT: PLAYER PANEL -->
+    <div class="player-panel">
+      <div class="panel-label">&#9632; Current Player</div>
+      <div class="player-image">
+        <img id="playerPhoto" src="" alt="" style="display:none;"
+             onerror="this.style.display='none';document.getElementById('noPhoto').style.display='flex';">
+        <div id="noPhoto" class="no-photo">&#128100;</div>
+      </div>
+      <div class="cards">
+        <div class="card" style="grid-column:span 2;">
+          <div class="label">Player Name</div>
+          <div class="value" id="playerName" style="font-size:clamp(20px,2.4vw,34px);">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Reg / ID</div>
+          <div class="value" id="playerRFID">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Punch Time</div>
+          <div class="value" id="punchTime" style="color:var(--cyan);text-shadow:0 0 14px var(--cyan);">—</div>
+        </div>
+        <div class="card" style="grid-column:span 2;">
+          <div class="label">Squad / Batch</div>
+          <div class="value" id="playerTeam" style="color:#ffd54f;text-shadow:0 0 14px rgba(255,213,79,.4);">—</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT -->
+    <div class="right-panel">
+      <div class="status-box state-idle" id="statusBox">
+        <div class="hex-deco tl">&#9670;</div>
+        <div class="hex-deco br">&#9670;</div>
+        <div id="statusContent">
+          <div class="status-idle-msg">&#128246; WAITING FOR ATTENDANCE</div>
+          <div class="status-idle-sub">Monitoring active devices&hellip;<br>Scan biometric to mark attendance.</div>
+        </div>
+      </div>
+
+      <div class="logs">
+        <div class="logs-header">
+          <span class="logs-header-title">&#9776; RECENT ATTENDANCE LOGS</span>
+          <span class="logs-count" id="logsCount">0 entries</span>
+        </div>
+        <div class="logs-body">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th><th>NAME</th><th>REG / ID</th>
+                <th>BATCH</th><th>TIME</th><th>API PUSH</th>
+              </tr>
+            </thead>
+            <tbody id="logsBody">
+              <tr><td colspan="6" class="empty-logs">&#9632; WAITING FOR BIOMETRIC SCANS &#9632;</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ══════════════════════════════════════════════════════════
+   STATE
+══════════════════════════════════════════════════════════ */
+var eventSource   = null;
+var devices       = {};   // { ip: { name, state, countdown, error } }
+var countdownTimers = {}; // { ip: intervalId }
+var logCount      = 0;
+var lastScanTs    = null; // timestamp of most recent attendance event
+
+/* ══════════════════════════════════════════════════════════
+   CLOCK
+══════════════════════════════════════════════════════════ */
+(function tick(){
+  var n = new Date();
+  document.getElementById('time').textContent =
+    String(n.getHours()).padStart(2,'0') + ':' +
+    String(n.getMinutes()).padStart(2,'0') + ':' +
+    String(n.getSeconds()).padStart(2,'0');
+  document.getElementById('date').textContent =
+    n.toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+  setTimeout(tick,1000);
+})();
+
+function timeOnly(ts){ return ts ? (ts.split(' ')[1] || ts) : '—'; }
+
+/* ══════════════════════════════════════════════════════════
+   SYSTEM STATUS (header-centre)
+══════════════════════════════════════════════════════════ */
+function renderDeviceStatus(){
+  var badge   = document.getElementById('sysBadge');
+  var dot     = document.getElementById('pulseDot');
+  var label   = document.getElementById('sysLabel');
+  var connLbl = document.getElementById('conn-label');
+  var devLbl  = document.getElementById('dev-label');
+  var chips   = document.getElementById('dev-chips');
+
+  var ips       = Object.keys(devices);
+  var connected = ips.filter(function(k){ return devices[k].state === 'connected'; });
+  var recon     = ips.filter(function(k){ return devices[k].state === 'reconnecting'; });
+  var errored   = ips.filter(function(k){ return devices[k].state === 'error'; });
+
+  /* Overall badge colour + label */
+  if(recon.length > 0){
+    badge.style.color = 'var(--gold)';
+    dot.classList.add('fast');
+    label.textContent = 'RECONNECTING...';
+    connLbl.textContent = recon.length + ' device(s) offline';
+  } else if(connected.length > 0){
+    badge.style.color = 'var(--green)';
+    dot.classList.remove('fast');
+    label.textContent = 'SYSTEM ONLINE';
+    connLbl.textContent = connected.length + ' device(s) active';
+  } else if(errored.length > 0){
+    badge.style.color = 'var(--red)';
+    dot.classList.add('fast');
+    label.textContent = 'DEVICE OFFLINE';
+    connLbl.textContent = 'Check device connections';
+  } else {
+    badge.style.color = 'var(--cyan2)';
+    dot.classList.remove('fast');
+    label.textContent = 'CONNECTING...';
+    connLbl.textContent = 'Waiting for devices...';
+  }
+
+  /* Per-device chips */
+  chips.innerHTML = '';
+  ips.forEach(function(ip){
+    var d   = devices[ip];
+    var chip = document.createElement('span');
+    chip.className = 'dev-chip state-' + d.state;
+
+    var dotEl = document.createElement('span');
+    dotEl.className = 'chip-dot';
+    chip.appendChild(dotEl);
+
+    var txt = '';
+    if(d.state === 'connected'){
+      txt = (d.name || ip);
+    } else if(d.state === 'reconnecting'){
+      var cd = d.countdown !== undefined ? d.countdown : d.delay;
+      txt = (d.name || ip) + ' · retry ' + cd + 's';
+      chip.title = 'Error: ' + (d.error || '');
+    } else if(d.state === 'error'){
+      txt = (d.name || ip) + ' · ERROR';
+      chip.title = d.error || '';
+    } else {
+      txt = ip + ' · connecting';
+    }
+    chip.appendChild(document.createTextNode(txt));
+    chips.appendChild(chip);
+  });
+
+  /* dev-label: show device names when all connected, else hide */
+  devLbl.textContent = '';
+}
+
+function startCountdown(ip, delay){
+  if(countdownTimers[ip]) clearInterval(countdownTimers[ip]);
+  devices[ip].countdown = delay;
+  renderDeviceStatus();
+  countdownTimers[ip] = setInterval(function(){
+    if(!devices[ip] || devices[ip].state !== 'reconnecting'){
+      clearInterval(countdownTimers[ip]);
+      delete countdownTimers[ip];
+      return;
+    }
+    devices[ip].countdown = Math.max(0, (devices[ip].countdown || 0) - 1);
+    renderDeviceStatus();
+    if(devices[ip].countdown <= 0){
+      clearInterval(countdownTimers[ip]);
+      delete countdownTimers[ip];
+    }
+  }, 1000);
+}
+
+/* ══════════════════════════════════════════════════════════
+   PLAYER PANEL + STATUS BOX
+══════════════════════════════════════════════════════════ */
+function apiPushBadge(apiStatus, apiReason){
+  if(apiStatus === 'sent')
+    return '<span style="background:rgba(0,255,128,.1);border:1px solid rgba(0,255,128,.35);color:var(--green);font-family:Orbitron,sans-serif;font-size:10px;font-weight:700;letter-spacing:1.5px;padding:5px 18px;border-radius:20px;">&#10003; PUSHED TO API</span>';
+  if(apiStatus === 'duplicate')
+    return '<span title="'+esc(apiReason)+'" style="background:rgba(0,229,255,.06);border:1px solid rgba(0,229,255,.2);color:rgba(0,229,255,.5);font-family:Orbitron,sans-serif;font-size:10px;font-weight:700;letter-spacing:1.5px;padding:5px 18px;border-radius:20px;cursor:help;">&#8635; DUPLICATE — NOT PUSHED</span>';
+  if(apiStatus === 'failed')
+    return '<span title="'+esc(apiReason)+'" style="background:rgba(255,68,68,.1);border:1px solid rgba(255,68,68,.35);color:var(--red);font-family:Orbitron,sans-serif;font-size:10px;font-weight:700;letter-spacing:1px;padding:5px 18px;border-radius:20px;cursor:help;">&#10007; PUSH FAILED: '+apiReason.substring(0,50)+'</span>';
+  /* pending */
+  return '<span style="background:rgba(255,213,79,.06);border:1px solid rgba(255,213,79,.2);color:rgba(255,213,79,.6);font-family:Orbitron,sans-serif;font-size:10px;font-weight:700;letter-spacing:1.5px;padding:5px 18px;border-radius:20px;">&#9719; SENDING...</span>';
+}
+
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+
+function updatePlayer(d){
+  var img = document.getElementById('playerPhoto');
+  var noP = document.getElementById('noPhoto');
+  if(d.photo_url){ img.src=d.photo_url; img.style.display='block'; noP.style.display='none'; }
+  else { img.style.display='none'; noP.style.display='flex'; }
+
+  document.getElementById('playerName').textContent = d.full_name || 'Unknown';
+  document.getElementById('playerRFID').textContent = d.reg_no   || ('ID: '+d.user_id);
+  document.getElementById('playerTeam').textContent = d.squad    || '—';
+  document.getElementById('punchTime').textContent  = timeOnly(d.timestamp);
+  document.getElementById('statusBox').className    = 'status-box';
+
+  lastScanTs = d.timestamp;
+
+  var squadChip = d.squad
+    ? '<span class="pdc-chip gold">&#9670; '+d.squad+'</span>' : '';
+  var devChip = d.device_name
+    ? '<span class="pdc-chip">&#9635; '+d.device_name+'</span>' : '';
+
+  document.getElementById('statusContent').innerHTML =
+    '<div class="pdc">'+
+      '<div style="text-align:center;">'+
+        '<span class="pdc-badge"><span class="bdot"></span>ATTENDANCE RECORDED</span>'+
+      '</div>'+
+      '<div class="pdc-name">'+(d.full_name||'Unknown Player')+'</div>'+
+      '<div class="pdc-reg">'+(d.reg_no||('ID: '+d.user_id))+'</div>'+
+      '<div class="pdc-row">'+squadChip+devChip+'</div>'+
+      '<div class="pdc-time">&#9201; '+timeOnly(d.timestamp)+'</div>'+
+      '<div style="margin-top:10px;text-align:center;" class="api-push-live">'+
+        apiPushBadge(d.api_status||'pending', d.api_reason||'')+
+      '</div>'+
+    '</div>';
+}
+
+/* ══════════════════════════════════════════════════════════
+   LOG TABLE
+══════════════════════════════════════════════════════════ */
+function pushCellHtml(apiStatus, apiReason){
+  if(apiStatus === 'sent')
+    return '<span style="color:#00ff80;font-family:Orbitron,sans-serif;font-size:10px;font-weight:700;">&#10003; SENT</span>';
+  if(apiStatus === 'duplicate')
+    return '<span style="color:rgba(255,255,255,.15);font-size:12px;">—</span>';
+  if(apiStatus === 'failed')
+    return '<span title="'+esc(apiReason)+'" style="color:#ff4444;font-family:Orbitron,sans-serif;font-size:10px;font-weight:700;cursor:help;">&#10007; FAIL</span>';
+  return '<span style="color:rgba(255,213,79,.5);font-family:Orbitron,sans-serif;font-size:10px;">&#9719;</span>';
+}
+
+function addLog(d){
+  var tbody = document.getElementById('logsBody');
+  var empty = tbody.querySelector('.empty-logs');
+  if(empty) tbody.removeChild(empty.parentNode);
+
+  logCount++;
+  document.getElementById('logsCount').textContent = logCount+' entr'+(logCount===1?'y':'ies');
+
+  var tr = document.createElement('tr');
+  tr.dataset.ts = d.timestamp;
+  tr.innerHTML =
+    '<td style="color:rgba(0,255,255,.3);font-size:10px;font-family:Orbitron,sans-serif;">'+logCount+'</td>'+
+    '<td style="text-align:left;font-weight:700;">'+(d.full_name||'Unknown')+'</td>'+
+    '<td style="color:rgba(0,255,255,.7);font-size:11px;">'+(d.reg_no||d.user_id)+'</td>'+
+    '<td style="font-size:12px;color:rgba(255,255,255,.55);">'+(d.squad||'—')+'</td>'+
+    '<td style="font-family:Orbitron,sans-serif;font-size:11px;color:rgba(255,255,255,.7);">'+timeOnly(d.timestamp)+'</td>'+
+    '<td class="push-cell">'+pushCellHtml(d.api_status||'pending', d.api_reason||'')+'</td>';
+
+  tbody.insertBefore(tr, tbody.firstChild);
+  while(tbody.children.length > 100) tbody.removeChild(tbody.lastChild);
+}
+
+/* Update push cell + status box when async push_update arrives */
+function applyPushUpdate(timestamp, apiStatus, apiReason){
+  /* log row */
+  var rows = document.querySelectorAll('#logsBody tr[data-ts]');
+  for(var i=0; i<rows.length; i++){
+    if(rows[i].dataset.ts === timestamp){
+      var cell = rows[i].querySelector('.push-cell');
+      if(cell) cell.innerHTML = pushCellHtml(apiStatus, apiReason);
+      break;
+    }
+  }
+  /* status box (only if this is the last scan shown) */
+  if(timestamp === lastScanTs){
+    var live = document.querySelector('.api-push-live');
+    if(live) live.innerHTML = apiPushBadge(apiStatus, apiReason);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   SSE CONNECTION
+══════════════════════════════════════════════════════════ */
+var sseRetryTimer = null;
+
+function connect(){
+  if(eventSource){ eventSource.close(); eventSource = null; }
+
+  /* Show SSE-level connecting state */
+  document.getElementById('sysBadge').style.color = 'var(--cyan2)';
+  document.getElementById('sysLabel').textContent  = 'CONNECTING...';
+  document.getElementById('conn-label').textContent = 'Opening stream...';
+
+  eventSource = new EventSource('/live/stream/');
+
+  eventSource.onmessage = function(e){
+    var d;
+    try{ d = JSON.parse(e.data); }catch(ex){ return; }
+
+    if(d.type === 'ping') return;
+
+    if(d.type === 'connected'){
+      /* Device came online (or reconnected) */
+      if(countdownTimers[d.device_ip]){
+        clearInterval(countdownTimers[d.device_ip]);
+        delete countdownTimers[d.device_ip];
+      }
+      devices[d.device_ip] = { name: d.device_name||d.device_ip, state:'connected' };
+      renderDeviceStatus();
+
+    } else if(d.type === 'reconnecting'){
+      /* Device went offline — backend is retrying */
+      devices[d.device_ip] = {
+        name:  devices[d.device_ip] ? (devices[d.device_ip].name||d.device_ip) : d.device_ip,
+        state: 'reconnecting',
+        delay: d.delay,
+        error: d.message||''
+      };
+      startCountdown(d.device_ip, d.delay);
+
+    } else if(d.type === 'error'){
+      devices[d.device_ip||''] = { name: d.device_ip||'?', state:'error', error: d.message||'' };
+      renderDeviceStatus();
+
+    } else if(d.type === 'attendance'){
+      updatePlayer(d);
+      addLog(d);
+
+    } else if(d.type === 'push_update'){
+      applyPushUpdate(d.timestamp, d.api_status, d.api_reason);
+    }
+  };
+
+  eventSource.onerror = function(){
+    /* SSE HTTP connection dropped — reconnect after 5 s */
+    document.getElementById('sysBadge').style.color  = 'var(--gold)';
+    document.getElementById('sysLabel').textContent   = 'STREAM RECONNECTING...';
+    document.getElementById('conn-label').textContent = 'Connection lost — retrying in 5s';
+    document.getElementById('dev-chips').innerHTML    = '';
+    eventSource.close();
+    eventSource = null;
+    if(sseRetryTimer) clearTimeout(sseRetryTimer);
+    sseRetryTimer = setTimeout(connect, 5000);
+  };
+}
+
+/* ══════════════════════════════════════════════════════════
+   FULLSCREEN
+══════════════════════════════════════════════════════════ */
+function toggleFullscreen(){
+  if(!document.fullscreenElement) document.documentElement.requestFullscreen();
+  else document.exitFullscreen();
+}
+document.addEventListener('fullscreenchange', function(){
+  document.getElementById('fs-icon').textContent  = document.fullscreenElement ? '✕' : '⛶';
+  document.getElementById('fs-label').textContent = document.fullscreenElement ? 'EXIT' : 'FULLSCREEN';
+});
+
+window.addEventListener('load', connect);
+window.addEventListener('beforeunload', function(){ if(eventSource) eventSource.close(); });
+</script>
+</body>
+</html>

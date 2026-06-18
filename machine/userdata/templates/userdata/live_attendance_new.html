@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sialkot Football Academy - Attendance Dashboard</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+<style>
+
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+}
+
+body{
+    font-family:'Orbitron',sans-serif;
+    background:#030814;
+    color:#fff;
+    overflow:hidden;
+}
+
+body::before{
+    content:'';
+    position:fixed;
+    inset:0;
+
+    background-image:
+    linear-gradient(rgba(0,255,255,.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,255,255,.07) 1px, transparent 1px);
+
+    background-size:40px 40px;
+}
+
+.container{
+    width:100vw;
+    height:100vh;
+    padding:20px;
+}
+
+/* HEADER */
+
+.header{
+    height:110px;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    margin-bottom:20px;
+}
+
+.brand{
+    display:flex;
+    align-items:center;
+    gap:20px;
+}
+
+.brand img{
+    width:90px;
+    height:90px;
+    object-fit:contain;
+    border-radius:50%;
+    box-shadow:0 0 20px #ffcc00;
+}
+
+.brand-text h1{
+    font-size:42px;
+    color:#ffd54f;
+    text-shadow:0 0 15px #ffcc00;
+}
+
+.brand-text p{
+    color:#88ffff;
+}
+
+.online{
+    text-align:center;
+}
+
+.online h2{
+    color:#00ff80;
+    font-size:28px;
+}
+
+.online p{
+    color:#90ffff;
+}
+
+.clock{
+    text-align:right;
+}
+
+#date{
+    color:#8cfbff;
+    margin-bottom:10px;
+}
+
+#time{
+    font-size:42px;
+    color:#00ffff;
+}
+
+/* MAIN */
+
+.main{
+    display:grid;
+    grid-template-columns:40% 60%;
+    gap:20px;
+    height:calc(100vh - 150px);
+}
+
+/* PLAYER PANEL */
+
+.player-panel{
+    border:2px solid #00e5ff;
+    border-radius:25px;
+    padding:20px;
+
+    box-shadow:
+    0 0 20px rgba(0,229,255,.5),
+    inset 0 0 20px rgba(0,229,255,.08);
+}
+
+.player-title{
+    text-align:center;
+    font-size:28px;
+    color:#00ffff;
+    margin-bottom:15px;
+}
+
+.player-image{
+    width:100%;
+    height:400px;
+    border-radius:20px;
+    overflow:hidden;
+    border:3px solid #00e5ff;
+    margin-bottom:20px;
+    position:relative;
+    background:#111827;
+    box-shadow:
+        0 0 20px rgba(0,229,255,0.4),
+        inset 0 0 20px rgba(0,229,255,0.15);
+}
+
+.player-image img{
+    width:100%;
+    height:100%;
+    object-fit:cover;
+    object-position:center top;
+    display:block;
+    transition:transform 0.5s ease;
+}
+
+.player-image:hover img{
+    transform:scale(1.05);
+}
+
+.player-image::after{
+    content:'';
+    position:absolute;
+    left:0;
+    width:100%;
+    height:4px;
+    background:#00ffff;
+    box-shadow:0 0 20px cyan;
+    animation:scan 3s linear infinite;
+}
+
+@keyframes scan{
+    0%{
+        top:0;
+    }
+    100%{
+        top:100%;
+    }
+}
+
+@keyframes scan{
+    0%{top:0}
+    100%{top:100%}
+}
+
+.cards{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:12px;
+}
+
+.card{
+    background:rgba(0,255,255,.05);
+    border:1px solid rgba(0,255,255,.25);
+    border-radius:15px;
+    padding:15px;
+    text-align:center;
+}
+
+.card .label{
+    font-size:12px;
+    color:#6fffff;
+}
+
+.card .value{
+    font-size:22px;
+    margin-top:8px;
+}
+
+/* RIGHT */
+
+.right-panel{
+    display:flex;
+    flex-direction:column;
+    gap:20px;
+}
+
+/* STATUS */
+
+.status-box{
+    flex:1;
+    border:2px solid #00ff99;
+    border-radius:25px;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    flex-direction:column;
+
+    background:rgba(0,255,120,.05);
+
+    box-shadow:0 0 25px rgba(0,255,120,.3);
+}
+
+.status-box h1{
+    font-size:70px;
+    color:#00ff80;
+    text-shadow:0 0 25px #00ff80;
+}
+
+.status-box p{
+    margin-top:20px;
+    font-size:24px;
+}
+
+/* TABLE */
+
+.logs{
+    height:330px;
+    border:2px solid #ffcc00;
+    border-radius:25px;
+    overflow:hidden;
+}
+
+.logs-header{
+    background:#ffcc00;
+    color:#000;
+    padding:15px;
+    text-align:center;
+    font-weight:bold;
+}
+
+table{
+    width:100%;
+    border-collapse:collapse;
+}
+
+th{
+    background:#081728;
+    color:#00ffff;
+    padding:15px;
+}
+
+td{
+    padding:15px;
+    text-align:center;
+    border-bottom:1px solid rgba(255,255,255,.08);
+}
+
+.present{
+    color:#00ff80;
+    font-weight:bold;
+}
+
+tbody{
+    animation:scrollTable 20s linear infinite;
+}
+
+@keyframes scrollTable{
+    0%{transform:translateY(0)}
+    50%{transform:translateY(-50px)}
+    100%{transform:translateY(0)}
+}
+
+</style>
+</head>
+<body>
+
+<div class="container">
+
+    <div class="header">
+
+        <div class="brand">
+            <img src="logo.png" alt="Logo">
+
+            <div class="brand-text">
+                <h1>SIALKOT FOOTBALL ACADEMY</h1>
+                <p>REAL-TIME PLAYER ATTENDANCE MONITORING</p>
+            </div>
+        </div>
+
+        <div class="online">
+            <h2>🟢 SYSTEM ONLINE</h2>
+            <p>Attendance Server Connected</p>
+        </div>
+
+        <div class="clock">
+            <div id="date"></div>
+            <div id="time"></div>
+        </div>
+
+    </div>
+
+    <div class="main">
+
+        <!-- LEFT -->
+
+        <div class="player-panel">
+
+            <div class="player-title">
+                CURRENT PLAYER
+            </div>
+
+            <div class="player-image">
+                <img id="playerPhoto"
+                     src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=1000"
+                     alt="">
+            </div>
+
+            <div class="cards">
+
+                <div class="card">
+                    <div class="label">PLAYER NAME</div>
+                    <div class="value" id="playerName">Ahmed Khan</div>
+                </div>
+
+                <div class="card">
+                    <div class="label">RFID</div>
+                    <div class="value" id="playerRFID">10001</div>
+                </div>
+
+                <div class="card">
+                    <div class="label">TEAM</div>
+                    <div class="value">U16</div>
+                </div>
+
+                <div class="card">
+                    <div class="label">PUNCH TIME</div>
+                    <div class="value" id="punchTime">08:15 AM</div>
+                </div>
+
+            </div>
+
+        </div>
+
+        <!-- RIGHT -->
+
+        <div class="right-panel">
+
+            <div class="status-box">
+
+                <h1>ATTENDANCE RECORDED</h1>
+
+                <p>
+                    ✅ Ahmed Khan Successfully Marked Present
+                </p>
+
+            </div>
+
+            <div class="logs">
+
+                <div class="logs-header">
+                    RECENT ATTENDANCE LOGS
+                </div>
+
+                <table>
+
+                    <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>RFID</th>
+                        <th>Time</th>
+                        <th>Status</th>
+                    </tr>
+                    </thead>
+
+                    <tbody>
+
+                    <tr>
+                        <td>Ahmed Khan</td>
+                        <td>10001</td>
+                        <td>08:15 AM</td>
+                        <td class="present">PRESENT</td>
+                    </tr>
+
+                    <tr>
+                        <td>Ali Raza</td>
+                        <td>10002</td>
+                        <td>08:12 AM</td>
+                        <td class="present">PRESENT</td>
+                    </tr>
+
+                    <tr>
+                        <td>Usman</td>
+                        <td>10003</td>
+                        <td>08:10 AM</td>
+                        <td class="present">PRESENT</td>
+                    </tr>
+
+                    <tr>
+                        <td>Hamza</td>
+                        <td>10004</td>
+                        <td>08:08 AM</td>
+                        <td class="present">PRESENT</td>
+                    </tr>
+
+                    </tbody>
+
+                </table>
+
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+<script>
+
+function updateClock(){
+
+    const now = new Date();
+
+    document.getElementById("time").innerHTML =
+        now.toLocaleTimeString();
+
+    document.getElementById("date").innerHTML =
+        now.toLocaleDateString('en-US',{
+            weekday:'long',
+            year:'numeric',
+            month:'long',
+            day:'numeric'
+        });
+
+}
+
+setInterval(updateClock,1000);
+updateClock();
+
+</script>
+
+</body>
+</html>
