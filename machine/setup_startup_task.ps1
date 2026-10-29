@@ -2,7 +2,7 @@
 # Right-click > Run with PowerShell (as Administrator)
 
 $TaskName   = "SFA_Attendance_Server"
-$VbsPath    = "D:\attedenceBackup\machine\start_server.vbs"
+$VbsPath    = "C:\machine\start_server.vbs"
 $Description = "Auto-start SFA Attendance Django server on Windows startup"
 
 # Remove old task if it exists
@@ -22,25 +22,42 @@ $Settings = New-ScheduledTaskSettingsSet `
     -RestartInterval (New-TimeSpan -Minutes 1) `
     -StartWhenAvailable
 
-# Run as current logged-in user
-$Principal = New-ScheduledTaskPrincipal `
-    -UserId "$env:USERDOMAIN\$env:USERNAME" `
-    -LogonType Interactive `
-    -RunLevel Highest
+# Run as the current user even when nobody is logged in (after a power cut / reboot).
+# Same Windows user is kept so SQL Server Windows authentication keeps working.
+# Windows needs this user's password once to store it with the task.
+$UserId = "$env:USERDOMAIN\$env:USERNAME"
+$Cred   = Get-Credential -UserName $UserId -Message "Enter the Windows password for $UserId"
+if (-not $Cred) {
+    Write-Host "Cancelled - task not registered." -ForegroundColor Red
+    pause
+    exit 1
+}
 
-Register-ScheduledTask `
-    -TaskName   $TaskName `
-    -Action     $Action `
-    -Trigger    $Trigger `
-    -Settings   $Settings `
-    -Principal  $Principal `
-    -Description $Description `
-    -Force
+try {
+    Register-ScheduledTask `
+        -TaskName   $TaskName `
+        -Action     $Action `
+        -Trigger    $Trigger `
+        -Settings   $Settings `
+        -User       $UserId `
+        -Password   $Cred.GetNetworkCredential().Password `
+        -RunLevel   Highest `
+        -Description $Description `
+        -Force `
+        -ErrorAction Stop | Out-Null
+} catch {
+    Write-Host ""
+    Write-Host "Task registration failed: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "Check the password and that this window is running as Administrator." -ForegroundColor Yellow
+    pause
+    exit 1
+}
 
 Write-Host ""
 Write-Host "Task registered successfully!" -ForegroundColor Green
 Write-Host "Task Name : $TaskName" -ForegroundColor Cyan
-Write-Host "Runs      : At every Windows startup (10s delay)" -ForegroundColor Cyan
+Write-Host "Runs      : At every Windows startup (10s delay), no login needed" -ForegroundColor Cyan
+Write-Host "User      : $UserId" -ForegroundColor Cyan
 Write-Host "Script    : $VbsPath" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "To remove this task later, run:" -ForegroundColor Yellow
