@@ -38,7 +38,8 @@ class dami(models.Model):
 
 
 class LiveAttendance(models.Model):
-    user_id     = models.IntegerField()
+    user_id     = models.IntegerField(null=True, blank=True)  # website player ID, NULL until identified
+    zk_user_id  = models.CharField(max_length=24, blank=True, default='')  # ID as stored on the device
     att_datetime= models.DateTimeField()
     status      = models.IntegerField(default=0)
     device_name = models.CharField(max_length=255, blank=True)
@@ -57,11 +58,22 @@ class LiveAttendance(models.Model):
     class Meta:
         db_table = 'live_attendance'
         ordering = ['-att_datetime']
+        indexes = [
+            models.Index(fields=['att_datetime'], name='live_att_time'),
+            models.Index(fields=['api_status', 'att_datetime'], name='live_att_status_time'),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=['user_id', 'att_datetime', 'device_ip'],
+                condition=models.Q(user_id__isnull=False),
                 name='unique_live_attendance_scan'
-            )
+            ),
+            # __gt, not ~Q: SQL Server filtered indexes do not accept NOT
+            models.UniqueConstraint(
+                fields=['zk_user_id', 'att_datetime', 'device_ip'],
+                condition=models.Q(zk_user_id__gt=''),
+                name='unique_live_attendance_zk_scan'
+            ),
         ]
 
 

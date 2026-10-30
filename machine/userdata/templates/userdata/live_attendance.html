@@ -565,11 +565,11 @@ function startCountdown(ip, delay){
    PLAYER PANEL + STATUS BOX
 ══════════════════════════════════════════════════════════ */
 function apiPushBadge(apiStatus, apiReason){
-  if(apiStatus === 'sent')
+  if(apiStatus === 'success')
     return '<span style="background:rgba(0,255,128,.1);border:1px solid rgba(0,255,128,.35);color:var(--green);font-family:Orbitron,sans-serif;font-size:10px;font-weight:700;letter-spacing:1.5px;padding:5px 18px;border-radius:20px;">&#10003; PUSHED TO API</span>';
   if(apiStatus === 'duplicate')
     return '<span title="'+esc(apiReason)+'" style="background:rgba(0,229,255,.06);border:1px solid rgba(0,229,255,.2);color:rgba(0,229,255,.5);font-family:Orbitron,sans-serif;font-size:10px;font-weight:700;letter-spacing:1.5px;padding:5px 18px;border-radius:20px;cursor:help;">&#8635; DUPLICATE — NOT PUSHED</span>';
-  if(apiStatus === 'failed')
+  if(apiStatus === 'failed' || apiStatus === 'rejected')
     return '<span title="'+esc(apiReason)+'" style="background:rgba(255,68,68,.1);border:1px solid rgba(255,68,68,.35);color:var(--red);font-family:Orbitron,sans-serif;font-size:10px;font-weight:700;letter-spacing:1px;padding:5px 18px;border-radius:20px;cursor:help;">&#10007; PUSH FAILED: '+apiReason.substring(0,50)+'</span>';
   /* pending */
   return '<span style="background:rgba(255,213,79,.06);border:1px solid rgba(255,213,79,.2);color:rgba(255,213,79,.6);font-family:Orbitron,sans-serif;font-size:10px;font-weight:700;letter-spacing:1.5px;padding:5px 18px;border-radius:20px;">&#9719; SENDING...</span>';
@@ -615,11 +615,11 @@ function updatePlayer(d){
    LOG TABLE
 ══════════════════════════════════════════════════════════ */
 function pushCellHtml(apiStatus, apiReason){
-  if(apiStatus === 'sent')
-    return '<span style="color:#00ff80;font-family:Orbitron,sans-serif;font-size:10px;font-weight:700;">&#10003; SENT</span>';
+  if(apiStatus === 'success')
+    return '<span style="color:#00ff80;font-family:Orbitron,sans-serif;font-size:10px;font-weight:700;">&#10003; SUCCESS</span>';
   if(apiStatus === 'duplicate')
     return '<span style="color:rgba(255,255,255,.15);font-size:12px;">—</span>';
-  if(apiStatus === 'failed')
+  if(apiStatus === 'failed' || apiStatus === 'rejected')
     return '<span title="'+esc(apiReason)+'" style="color:#ff4444;font-family:Orbitron,sans-serif;font-size:10px;font-weight:700;cursor:help;">&#10007; FAIL</span>';
   return '<span style="color:rgba(255,213,79,.5);font-family:Orbitron,sans-serif;font-size:10px;">&#9719;</span>';
 }
