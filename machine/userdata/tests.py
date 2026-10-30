@@ -1,8 +1,9 @@
+import io
 from datetime import datetime, timedelta
 from unittest import mock
 
 from django.db import IntegrityError, transaction
-from django.test import TestCase
+from django.test import RequestFactory, TestCase
 from django.utils import timezone
 from zk.attendance import Attendance
 
@@ -284,6 +285,199 @@ class PlayerCacheTests(AttendanceTestCase):
             session.get.return_value = mock.Mock(status_code=200, json=lambda: {'fullName': 'OK'})
             self.assertEqual(views.get_player_info('7'), {'fullName': 'OK'})
         views._player_cache.clear()
+
+
+class BackDataPageTests(AttendanceTestCase):
+    day = datetime(2026, 10, 29, 16, 0, 0)
+
+    def setUp(self):
+        super().setUp()
+        when = timezone.make_aware(self.day)
+        make_record(user_id=1, api_status='success', att_datetime=when)
+        make_record(user_id=2, api_status='duplicate', att_datetime=when)
+        make_record(user_id=3, api_status='failed', att_datetime=when)
+        make_waiting_scan(zk_user_id='612', att_datetime=when)
+        make_waiting_scan(zk_user_id='612', att_datetime=when - timedelta(days=20))
+        make_waiting_scan(zk_user_id='618', att_datetime=when - timedelta(days=5))
+
+    def page(self, **params):
+        query = {'from_date': '2026-10-29', 'to_date': '2026-10-29', **params}
+        request = RequestFactory().get('/back-data/', query)
+        with mock.patch.object(views, 'render', wraps=views.render) as render:
+            response = views.back_data_page(request)
+        response.context = render.call_args.args[2]
+        return response
+
+    def counts(self, response):
+        return {tab['key']: tab['count'] for tab in response.context['api_tabs']}
+
+    def test_tabs_count_the_selected_dates(self):
+        self.assertEqual(self.counts(self.page()),
+                         {'all': 4, 'success': 1, 'pending': 1, 'failed': 1, 'duplicate': 1})
+
+    def test_filter_lists_only_that_outcome(self):
+        rows = self.page(api='duplicate').context['records']
+        self.assertEqual([r['api_status'] for r in rows], ['duplicate'])
+
+    def test_filter_keeps_page_stats_for_the_whole_range(self):
+        self.assertEqual(self.page(api='duplicate').context['stats']['total'], 4)
+
+    def test_unsent_view_covers_every_date_and_matches_send_now(self):
+        response = self.page(unsent='1')
+        self.assertEqual(len(response.context['records']), views.send_status()['unsent'])
+        self.assertEqual({r['api_status'] for r in response.context['records']}, {'pending', 'failed'})
+
+    def test_unsent_view_groups_waiting_scans_by_zk_id(self):
+        response = self.page(unsent='1')
+        self.assertEqual([(p['zk_user_id'], p['scans']) for p in response.context['waiting_players']],
+                         [('612', 2), ('618', 1)])
+        self.assertEqual(response.context['waiting_scans'], 3)
+
+    def test_unsent_view_explains_what_to_do(self):
+        self.assertContains(self.page(unsent='1'), '2 players to register on the website')
+
+    def test_tabs_keep_the_date_range(self):
+        self.assertIn('from_date=2026-10-29', self.page().context['api_tabs'][2]['url'])
+
+    def test_time_is_local_not_utc(self):
+        self.assertIn('04:00:00 PM', [r['time_only'] for r in self.page().context['records']])
+
+    def test_face_scan_counts_as_check_in(self):
+        LiveAttendance.objects.update(status=15)
+        self.assertEqual(self.page().context['stats']['check_in'], 4)
+
+    def test_send_bar_links_to_the_unsent_view(self):
+        self.assertContains(self.page(), '/back-data/?unsent=1')
+
+
+class SendNowTests(AttendanceTestCase):
+    def post(self):
+        request = RequestFactory().post('/api/send-pending/')
+        with mock.patch.object(views.threading, 'Thread') as thread:
+            response = views.api_send_pending(request)
+        return response, thread
+
+    def tearDown(self):
+        if views._retry_lock.locked():
+            views._retry_lock.release()
+
+    def test_post_starts_a_background_send(self):
+        _, thread = self.post()
+        thread.return_value.start.assert_called_once_with()
+
+    def test_second_press_while_sending_starts_nothing(self):
+        self.post()
+        _, thread = self.post()
+        self.assertEqual(thread.call_count, 0)
+
+    def test_get_only_reports_progress(self):
+        make_record(api_status='failed')
+        with mock.patch.object(views.threading, 'Thread') as thread:
+            response = views.api_send_pending(RequestFactory().get('/api/send-pending/'))
+        self.assertEqual(thread.call_count, 0)
+        self.assertIn(b'"unsent": 1', response.content)
+
+    def test_loop_skips_while_the_button_is_sending(self):
+        make_record()
+        self.post()
+        with mock.patch.object(views, 'push_attendance_to_local_api') as push:
+            views.retry_unsent_pushes()
+        self.assertEqual(push.call_count, 0)
+
+    def test_summary_counts_each_result(self):
+        make_record(user_id=1)
+        make_record(user_id=2)
+        make_waiting_scan()
+        results = [('success', 'ok'), ('rejected', 'HTTP 422: no')]
+        with mock.patch.object(views, 'get_player_info', return_value=None), \
+                mock.patch.object(views, 'push_attendance_to_local_api', side_effect=results):
+            views.retry_unsent_pushes()
+        status = views.send_status()
+        self.assertEqual((status['sent'], status['rejected'], status['waiting'], status['unsent']), (1, 1, 1, 1))
+        self.assertFalse(status['running'])
+
+    def test_unreachable_api_is_reported(self):
+        make_record()
+        with mock.patch.object(views, 'push_attendance_to_local_api',
+                               return_value=('failed', 'Network error: timed out')):
+            views.retry_unsent_pushes()
+        self.assertIn('Network error', views.send_status()['problem'])
+
+    def test_crash_in_a_pass_keeps_the_loop_alive_and_frees_the_lock(self):
+        with mock.patch.object(views, '_retry_pass', side_effect=ValueError('boom')):
+            views.retry_unsent_pushes()
+        self.assertFalse(views._retry_lock.locked())
+        self.assertEqual(views.send_status()['problem'], 'boom')
+
+
+class LogSafetyTests(TestCase):
+    def test_print_cannot_stop_a_push_on_a_cp1252_log(self):
+        raw = io.BytesIO()
+        log = io.TextIOWrapper(raw, encoding='cp1252', write_through=True)
+        log.reconfigure(errors='backslashreplace')
+        with mock.patch.object(views, '_http_session') as session, \
+                mock.patch.object(views, '_local_api_token', 'token'), \
+                mock.patch('sys.stdout', log):
+            session.put.return_value = mock.Mock(status_code=200, text='ok')
+            status, _ = views.push_attendance_to_local_api(7, timezone.now(), 0)
+        self.assertEqual(status, 'success')
+
+
+class RecordsPageTests(AttendanceTestCase):
+    day = datetime(2026, 10, 30, 16, 0, 0)
+
+    def setUp(self):
+        super().setUp()
+        statuses = ['success', 'success', 'pending', 'failed', 'rejected', 'duplicate']
+        for offset, status in enumerate(statuses):
+            make_record(user_id=offset + 1, api_status=status, full_name=f'Player {offset}',
+                        att_datetime=timezone.make_aware(self.day + timedelta(minutes=offset)))
+        LiveAttendance.objects.filter(api_status='rejected').update(api_reason='HTTP 422: Player is inactive')
+
+    def page(self, **params):
+        # RequestFactory: the test client's context copy breaks on Django 4.2.6 + Python 3.14
+        request = RequestFactory().get('/records/', {'date': '2026-10-30', **params})
+        with mock.patch.object(views, 'render', wraps=views.render) as render:
+            response = views.attendance_records(request)
+        response.context = render.call_args.args[2]
+        return response
+
+    def counts(self, response):
+        return {tab['key']: tab['count'] for tab in response.context['api_tabs']}
+
+    def test_tabs_count_each_api_outcome(self):
+        self.assertEqual(self.counts(self.page()),
+                         {'all': 6, 'success': 2, 'pending': 1, 'failed': 2, 'duplicate': 1})
+
+    def test_filter_shows_only_that_outcome_but_keeps_all_counts(self):
+        response = self.page(api='failed')
+        self.assertEqual({r['api_label'] for r in response.context['records']}, {'Failed', 'Rejected'})
+        self.assertEqual(self.counts(response)['all'], 6)
+
+    def test_unknown_filter_falls_back_to_all(self):
+        self.assertEqual(len(self.page(api='nonsense').context['records']), 6)
+
+    def test_api_response_text_is_shown(self):
+        self.assertContains(self.page(api='failed'), 'HTTP 422: Player is inactive')
+
+    def test_missing_reason_gets_a_readable_message(self):
+        self.assertContains(self.page(api='pending'), 'Waiting to send to API')
+
+    def test_tabs_keep_date_and_search(self):
+        tab = self.page(search='Player 1').context['api_tabs'][1]
+        self.assertIn('date=2026-10-30', tab['url'])
+        self.assertIn('search=Player+1', tab['url'])
+
+    def test_time_is_local_not_utc(self):
+        rows = self.page().context['records']
+        self.assertIn('04:00:00 PM', [r['time_only'] for r in rows])
+
+    def test_sent_percent_ignores_duplicates(self):
+        self.assertEqual(self.page().context['stats']['sent_percent'], 40)
+
+    def test_unknown_player_is_labelled(self):
+        make_waiting_scan(att_datetime=timezone.make_aware(self.day))
+        self.assertContains(self.page(api='pending'), 'Unknown player')
 
 
 class PushResultTests(AttendanceTestCase):

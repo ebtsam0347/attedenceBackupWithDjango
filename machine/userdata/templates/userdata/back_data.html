@@ -150,6 +150,19 @@ table.at tbody tr:last-child td{border-bottom:none;}
   .form-row{flex-direction:column;align-items:stretch;}
   .form-input,.form-input.search{min-width:0;width:100%;}
 }
+.api-why{font-size:11px;line-height:1.4;color:var(--muted);margin-top:5px;max-width:230px;}
+.unsent-head{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:16px;}
+.unsent-title{font-size:18px;font-weight:800;color:var(--text);}
+.unsent-sub{font-size:13px;color:var(--muted);margin-top:3px;}
+.waiting-card{background:#111623;border:1px solid rgba(251,191,36,.32);border-radius:14px;padding:18px 20px;margin-bottom:18px;}
+.waiting-title{font-size:15px;font-weight:800;color:#fbbf24;}
+.waiting-title .fa{margin-right:5px;}
+.waiting-sub{font-size:13px;line-height:1.5;color:#b4bccb;margin:6px 0 12px;}
+.waiting-table{width:100%;border-collapse:collapse;min-width:480px;}
+.waiting-table th{font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:#8791a6;text-align:left;padding:9px 12px;border-bottom:1px solid #232a3b;white-space:nowrap;}
+.waiting-table td{font-size:13px;color:#b4bccb;padding:9px 12px;border-bottom:1px solid #232a3b;white-space:nowrap;}
+.waiting-table tr:last-child td{border-bottom:0;}
+.waiting-id{font-family:Consolas,monospace;font-size:14px;font-weight:700;color:#eef0f6 !important;}
 </style>
 </head>
 <body>
@@ -266,15 +279,56 @@ table.at tbody tr:last-child td{border-bottom:none;}
     </form>
   </div>
 
+  {% if unsent_view %}
+  <div class="unsent-head">
+    <div>
+      <div class="unsent-title">Records not sent to API &mdash; all dates</div>
+      <div class="unsent-sub">These scans are saved safely. Nothing here is lost.</div>
+    </div>
+    <a href="/back-data/?from_date={{ from_date }}&to_date={{ to_date }}" class="btn btn-ghost"><i class="fa fa-arrow-left"></i> Back to date view</a>
+  </div>
+
+  {% if waiting_players %}
+  <div class="waiting-card">
+    <div class="waiting-title"><i class="fa fa-user-plus"></i> {{ waiting_players|length }} player{{ waiting_players|length|pluralize }} to register on the website</div>
+    <div class="waiting-sub">{{ waiting_scans }} scan{{ waiting_scans|pluralize }} belong to these ZK IDs. Send Now cannot send them yet. Register each ID on the website and its scans go automatically within 2 minutes.</div>
+    <div class="table-wrap">
+      <table class="waiting-table">
+        <thead><tr><th>ZK ID</th><th>Scans waiting</th><th>First scan</th><th>Last scan</th></tr></thead>
+        <tbody>
+        {% for p in waiting_players %}
+        <tr>
+          <td class="waiting-id">{{ p.zk_user_id }}</td>
+          <td>{{ p.scans }}</td>
+          <td>{{ p.first|date:"Y-m-d h:i A" }}</td>
+          <td>{{ p.last|date:"Y-m-d h:i A" }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+  {% else %}
+  {% include 'userdata/_api_tabs.html' %}
+  {% endif %}
+
   <!-- VIEW FILTER (GET) -->
   <form method="get" action="">
+  <input type="hidden" name="api" value="{{ api_tab }}">
   <div class="toolbar">
     <span style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase;white-space:nowrap;"><i class="fa fa-filter"></i> Filter Records</span>
+    {% if unsent_view %}
+    <input type="hidden" name="unsent" value="1">
+    <input type="hidden" name="from_date" value="{{ from_date }}">
+    <input type="hidden" name="to_date" value="{{ to_date }}">
+    {% else %}
     <input type="date" name="from_date" class="form-input" value="{{ from_date }}" style="min-width:150px;background:rgba(255,255,255,.06);border:1px solid var(--border);color:var(--text);padding:9px 14px;border-radius:var(--radius-sm);font-size:13px;outline:none;">
     <input type="date" name="to_date"   class="form-input" value="{{ to_date }}"   style="min-width:150px;background:rgba(255,255,255,.06);border:1px solid var(--border);color:var(--text);padding:9px 14px;border-radius:var(--radius-sm);font-size:13px;outline:none;">
+    {% endif %}
     <input type="text" name="search" class="form-input search" placeholder="Name, Reg No, Squad, ID..." value="{{ search }}" style="min-width:220px;background:rgba(255,255,255,.06);border:1px solid var(--border);color:var(--text);padding:9px 14px;border-radius:var(--radius-sm);font-size:13px;outline:none;">
     <button type="submit" class="btn btn-view"><i class="fa fa-search"></i> View Records</button>
-    <a href="/back-data/" class="btn btn-ghost"><i class="fa fa-times"></i> Clear</a>
+    <a href="/back-data/{% if unsent_view %}?unsent=1{% endif %}" class="btn btn-ghost"><i class="fa fa-times"></i> Clear</a>
     <div style="flex:1;"></div>
     <span class="rec-count"><i class="fa fa-database"></i>&nbsp;{{ records|length }} records</span>
   </div>
@@ -319,8 +373,8 @@ table.at tbody tr:last-child td{border-bottom:none;}
         <td><div class="td-time">{{ r.time_only }}</div></td>
 
         <td>
-          {% if r.status == 0 %}
-          <span class="badge badge-in"><i class="fa fa-arrow-down"></i> Check-In</span>
+          {% if r.status == 0 or r.status == 15 %}
+          <span class="badge badge-in"><i class="fa fa-arrow-down"></i> {{ r.status_label }}</span>
           {% elif r.status == 1 %}
           <span class="badge badge-out"><i class="fa fa-arrow-up"></i> Check-Out</span>
           {% else %}
@@ -332,12 +386,13 @@ table.at tbody tr:last-child td{border-bottom:none;}
           {% if r.api_status == 'success' %}
           <span class="api-badge api-sent"><i class="fa fa-check"></i> Success</span>
           {% elif r.api_status == 'failed' or r.api_status == 'rejected' %}
-          <span class="api-badge api-failed" title="{{ r.api_reason }}"><i class="fa fa-times"></i> Failed</span>
+          <span class="api-badge api-failed" title="{{ r.api_reason }}"><i class="fa fa-times"></i> {{ r.api_label }}</span>
           {% elif r.api_status == 'duplicate' %}
-          <span class="api-badge api-dup"><i class="fa fa-minus"></i> Dup</span>
+          <span class="api-badge api-dup" title="{{ r.api_reason }}"><i class="fa fa-minus"></i> Duplicate</span>
           {% else %}
-          <span class="api-badge api-pending"><i class="fa fa-clock-o"></i> {{ r.api_status|default:"pending" }}</span>
+          <span class="api-badge api-pending" title="{{ r.api_reason }}"><i class="fa fa-clock-o"></i> Pending</span>
           {% endif %}
+          {% if api_tab != 'all' or unsent_view %}<div class="api-why">{{ r.api_reason }}</div>{% endif %}
         </td>
 
         <td><span class="td-device">{{ r.device_name|default:"—" }}</span></td>
@@ -357,9 +412,12 @@ table.at tbody tr:last-child td{border-bottom:none;}
       <span class="es-icon">&#128202;</span>
       <div class="es-title">No Records Found</div>
       <div class="es-sub">
-        No attendance records found between <strong>{{ from_date }}</strong> and <strong>{{ to_date }}</strong>.<br>
+        {% if unsent_view %}Every record has been handled.
+        {% elif api_tab != 'all' %}No records match this filter between <strong>{{ from_date }}</strong> and <strong>{{ to_date }}</strong>.<br>
+        Choose <strong>All Scans</strong> above, or change the dates.
+        {% else %}No attendance records found between <strong>{{ from_date }}</strong> and <strong>{{ to_date }}</strong>.<br>
         Use the <strong>Pull from Devices</strong> button above to fetch historical data,<br>
-        or adjust the date range filter.
+        or adjust the date range filter.{% endif %}
       </div>
     </div>
     {% endif %}
