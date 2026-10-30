@@ -1,0 +1,34 @@
+<style>
+.api-tabs{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:18px;}
+.api-tab{background:#111623;border:1px solid #232a3b;border-radius:14px;padding:15px 17px;text-decoration:none;color:#eef0f6;display:flex;align-items:center;justify-content:space-between;gap:10px;transition:.15s;min-width:0;}
+.api-tab:hover{background:#171d2c;text-decoration:none;color:#eef0f6;}
+.api-tab:focus-visible{outline:2px solid #6d8bff;outline-offset:2px;}
+.api-tab-label{font-size:12px;color:#b4bccb;font-weight:600;display:flex;align-items:center;gap:7px;white-space:nowrap;}
+.api-tab-count{font-size:24px;font-weight:800;line-height:1;}
+.api-tab.all .fa,.api-tab.all.active .api-tab-count{color:#6d8bff;}
+.api-tab.success .fa,.api-tab.success.active .api-tab-count{color:#34d399;}
+.api-tab.pending .fa,.api-tab.pending.active .api-tab-count{color:#fbbf24;}
+.api-tab.failed .fa,.api-tab.failed.active .api-tab-count{color:#f87171;}
+.api-tab.duplicate .fa,.api-tab.duplicate.active .api-tab-count{color:#8791a6;}
+.api-tab.active{background:#171d2c;}
+.api-tab.all.active{border-color:rgba(109,139,255,.4);}
+.api-tab.success.active{border-color:rgba(52,211,153,.32);}
+.api-tab.pending.active{border-color:rgba(251,191,36,.32);}
+.api-tab.failed.active{border-color:rgba(248,113,113,.32);}
+.api-tab.duplicate.active{border-color:#8791a6;}
+@media(max-width:980px){.api-tabs{grid-template-columns:repeat(3,minmax(0,1fr));}}
+@media(max-width:700px){
+  .api-tabs{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}
+  .api-tab{padding:12px 13px;}
+  .api-tab-count{font-size:20px;}
+}
+</style>
+
+<div class="api-tabs">
+  {% for tab in api_tabs %}
+  <a href="{{ tab.url }}" class="api-tab {{ tab.key }}{% if tab.active %} active{% endif %}"{% if tab.active %} aria-current="true"{% endif %}>
+    <span class="api-tab-label"><i class="fa {{ tab.icon }}"></i> {{ tab.label }}</span>
+    <span class="api-tab-count">{{ tab.count }}</span>
+  </a>
+  {% endfor %}
+</div>

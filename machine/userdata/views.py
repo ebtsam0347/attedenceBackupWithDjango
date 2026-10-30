@@ -339,12 +339,32 @@ API_STATUS_LABELS = {
 }
 
 
+_TAB_FOR_STATUS = {status: tab[0] for tab in API_TABS if tab[3] for status in tab[3]}
+_TAB_REASONS = {tab[0]: tab[4] for tab in API_TABS}
+
+
+def _selected_api_tab(request):
+    api_tab = request.GET.get('api', 'all')
+    return api_tab if api_tab in _TAB_REASONS else 'all'
+
+
+def _api_tab_links(counts, active, params):
+    """The filter cards above a table. params are kept in each card's link."""
+    links = []
+    for key, label, icon, _, _ in API_TABS:
+        query = {k: v for k, v in params.items() if v}
+        query['api'] = key
+        links.append({
+            'key': key, 'label': label, 'icon': icon, 'count': counts[key],
+            'url': '?' + urlencode(query), 'active': key == active,
+        })
+    return links
+
+
 def attendance_records(request):
     date_str = request.GET.get('date', datetime.now().strftime('%Y-%m-%d'))
     search   = request.GET.get('search', '').strip()
-    api_tab  = request.GET.get('api', 'all')
-    if api_tab not in [tab[0] for tab in API_TABS]:
-        api_tab = 'all'
+    api_tab  = _selected_api_tab(request)
 
     try:
         selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
@@ -356,8 +376,6 @@ def attendance_records(request):
     error_msg = ''
     status_map = {0:'Check-In', 1:'Check-Out', 2:'Break-Out', 3:'Break-In', 4:'OT-In', 5:'OT-Out', 15:'Face-Check-In'}
     tab_counts = {tab[0]: 0 for tab in API_TABS}
-    tab_for_status = {status: tab[0] for tab in API_TABS if tab[3] for status in tab[3]}
-    tab_reasons = {tab[0]: tab[4] for tab in API_TABS}
 
     try:
         day_start, day_end = _day_bounds(selected_date, selected_date)
@@ -382,7 +400,7 @@ def attendance_records(request):
             threading.Thread(target=_warm_player_cache, args=(missing,), daemon=True).start()
 
         for row in rows:
-            row_tab = tab_for_status.get(row.api_status, 'pending')
+            row_tab = _TAB_FOR_STATUS.get(row.api_status, 'pending')
             tab_counts['all'] += 1
             tab_counts[row_tab] += 1
             if api_tab not in ('all', row_tab):
@@ -396,7 +414,7 @@ def attendance_records(request):
                 'time_only':   local_time.strftime('%I:%M:%S %p'),
                 'api_tab':     row_tab,
                 'api_label':   API_STATUS_LABELS.get(row.api_status, row.api_status),
-                'api_reason':  row.api_reason or tab_reasons[row_tab],
+                'api_reason':  row.api_reason or _TAB_REASONS[row_tab],
                 'status':      row.status,
                 'status_label': status_map.get(row.status, str(row.status)),
                 'device_name': row.device_name,
@@ -420,20 +438,10 @@ def attendance_records(request):
     except Exception as e:
         error_msg = str(e)
 
-    api_tabs = []
-    for key, label, icon, _, _ in API_TABS:
-        params = {'date': date_str, 'api': key}
-        if search:
-            params['search'] = search
-        api_tabs.append({
-            'key': key, 'label': label, 'icon': icon, 'count': tab_counts[key],
-            'url': '?' + urlencode(params), 'active': key == api_tab,
-        })
-
     return render(request, 'userdata/attendance_records.html', {
         'records':       records,
         'stats':         stats,
-        'api_tabs':      api_tabs,
+        'api_tabs':      _api_tab_links(tab_counts, api_tab, {'date': date_str, 'search': search}),
         'api_tab':       api_tab,
         'send_status':   send_status(),
         'selected_date': date_str,
@@ -887,6 +895,8 @@ def back_data_page(request):
     from_str  = request.GET.get('from_date', today_str)
     to_str    = request.GET.get('to_date',   today_str)
     search    = request.GET.get('search', '').strip()
+    api_tab   = _selected_api_tab(request)
+    unsent_view = request.GET.get('unsent') == '1'  # every date: the records in the Send Now count
     pull_result = None
     pull_error  = ''
 
@@ -913,8 +923,11 @@ def back_data_page(request):
 
     status_map = {0:'Check-In',1:'Check-Out',2:'Break-Out',3:'Break-In',4:'OT-In',5:'OT-Out',15:'Face-Check-In'}
 
-    range_start, range_end = _day_bounds(from_date, to_date)
-    qs = LiveAttendance.objects.filter(att_datetime__gte=range_start, att_datetime__lt=range_end)
+    if unsent_view:
+        qs = LiveAttendance.objects.filter(api_status__in=_UNSENT_STATUSES)
+    else:
+        range_start, range_end = _day_bounds(from_date, to_date)
+        qs = LiveAttendance.objects.filter(att_datetime__gte=range_start, att_datetime__lt=range_end)
     if search:
         qs = qs.filter(
             Q(full_name__icontains=search)  |
@@ -924,13 +937,32 @@ def back_data_page(request):
             Q(zk_user_id__icontains=search)
         )
 
+    rows = list(qs)
+    tab_counts = {tab[0]: 0 for tab in API_TABS}
+    waiting_players = {}
     records = []
-    for row in qs:
+    for row in rows:
+        row_tab = _TAB_FOR_STATUS.get(row.api_status, 'pending')
+        tab_counts['all'] += 1
+        tab_counts[row_tab] += 1
+        local_time = timezone.localtime(row.att_datetime)
+
+        if row.user_id is None and row_tab == 'pending':
+            player = waiting_players.setdefault(row.zk_user_id, {
+                'zk_user_id': row.zk_user_id, 'scans': 0, 'first': local_time, 'last': local_time,
+            })
+            player['scans'] += 1
+            player['first'] = min(player['first'], local_time)
+            player['last']  = max(player['last'], local_time)
+
+        if api_tab not in ('all', row_tab):
+            continue
         records.append({
             'user_id':      row.user_id or row.zk_user_id,
-            'datetime':     row.att_datetime.strftime('%Y-%m-%d %H:%M:%S'),
-            'date_only':    row.att_datetime.strftime('%Y-%m-%d'),
-            'time_only':    row.att_datetime.strftime('%I:%M:%S %p'),
+            'datetime':     local_time.strftime('%Y-%m-%d %H:%M:%S'),
+            'date_only':    local_time.strftime('%Y-%m-%d'),
+            'time_only':    local_time.strftime('%I:%M:%S %p'),
+            'api_label':    API_STATUS_LABELS.get(row.api_status, row.api_status),
             'status':       row.status,
             'status_label': status_map.get(row.status, str(row.status)),
             'device_name':  row.device_name,
@@ -939,14 +971,14 @@ def back_data_page(request):
             'squad':        row.squad,
             'reg_no':       row.reg_no,
             'api_status':   row.api_status,
-            'api_reason':   row.api_reason,
+            'api_reason':   row.api_reason or _TAB_REASONS[row_tab],
         })
 
     stats = {
-        'total':    len(records),
-        'check_in': sum(1 for r in records if r['status'] == 0),
-        'check_out':sum(1 for r in records if r['status'] == 1),
-        'unique':   len({r['user_id'] for r in records}),
+        'total':    len(rows),
+        'check_in': sum(1 for r in rows if r.status in (0, 15)),
+        'check_out':sum(1 for r in rows if r.status == 1),
+        'unique':   len({r.user_id or r.zk_user_id for r in rows}),
     }
 
     return render(request, 'userdata/back_data.html', {
@@ -955,6 +987,14 @@ def back_data_page(request):
         'from_date':   from_str,
         'to_date':     to_str,
         'search':      search,
+        'api_tabs':    _api_tab_links(tab_counts, api_tab, {
+            'from_date': from_str, 'to_date': to_str, 'search': search,
+            'unsent': '1' if unsent_view else '',
+        }),
+        'api_tab':     api_tab,
+        'unsent_view': unsent_view,
+        'waiting_players': sorted(waiting_players.values(), key=lambda p: -p['scans']),
+        'waiting_scans':   sum(p['scans'] for p in waiting_players.values()),
         'pull_result': pull_result,
         'pull_error':  pull_error,
         'send_status': send_status(),
