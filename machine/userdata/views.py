@@ -6,6 +6,8 @@ from config import table_for_devices
 
 from django.shortcuts import render
 from django.http import HttpResponse, StreamingHttpResponse, JsonResponse
+from django.db.models import Q
+import os
 import sys
 import zklib
 import time
@@ -24,7 +26,10 @@ import pandas as pd
 import socket as _socket
 
 # ── API CONFIG ────────────────────────────────────────────────────────────────
-PLAYER_API_BASE = 'https://www.sialkotfootballacademy.pk'
+# Set these three environment variables to run against UAT instead of production
+PLAYER_API_BASE     = os.environ.get('PLAYER_API_BASE', 'https://www.sialkotfootballacademy.pk')
+PLAYER_API_LOGIN    = os.environ.get('PLAYER_API_LOGIN', 'admin@sfa.pk')
+PLAYER_API_PASSWORD = os.environ.get('PLAYER_API_PASSWORD', 'F0rward@3456')
 
 # Shared HTTP session — reuses TCP connections (big speed win for repeated calls)
 _http_session = req_lib.Session()
@@ -32,8 +37,16 @@ _http_session = req_lib.Session()
 # In-memory player info cache — avoids a GET request for every live scan
 _player_cache = {}        # {user_id: {'data': {...}|None, 'ts': float}}
 _PLAYER_CACHE_TTL = 1800  # 30 minutes
+_PLAYER_MISS_TTL  = 60    # failed lookups may just be an API outage — ask again soon
 
 _local_api_token = None
+
+_PULL_LOOKBACK_DAYS = 7  # auto-pull re-reads this many past days so scans missed while the server was off are saved
+_DEVICE_FULL_READ_SECONDS = 3600  # a full device log can overwrite old scans without its count changing
+_UNSENT_STATUSES = ['pending', '', 'failed']
+_player_api_down = False  # set by get_player_info, ends a retry pass early during an outage
+# API is unreachable — the rest of the batch would fail the same way
+_RETRY_STOP_REASONS = ('Network error', 'Auth token missing', 'Token refresh failed')
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -56,7 +69,7 @@ def _get_local_api_token():
     try:
         r = _http_session.post(
             f'{PLAYER_API_BASE}/api/auth/login',
-            json={'login': 'admin@sfa.pk', 'password': 'F0rward@3456'},
+            json={'login': PLAYER_API_LOGIN, 'password': PLAYER_API_PASSWORD},
             timeout=5
         )
         if r.status_code == 200:
@@ -70,19 +83,21 @@ def _get_local_api_token():
 
 def push_attendance_to_local_api(user_id, att_datetime, status, device_name='', device_ip=''):
     """Push one attendance record to /api/attendance/players/{user_id}.
-    Returns (api_status, api_reason) — 'sent'|'failed', reason string."""
+    Returns (api_status, api_reason) — 'success'|'failed'|'rejected', reason string.
+    'failed' is temporary and gets retried; 'rejected' will never succeed."""
     global _local_api_token
 
     if not user_id:
-        return 'failed', 'No valid player ID — push skipped'
+        return 'rejected', 'No valid player ID — push skipped'
 
     if not _local_api_token:
         _get_local_api_token()
     if not _local_api_token:
         return 'failed', 'Auth token missing — login failed'
 
-    push_date   = att_datetime.strftime('%Y-%m-%d')
-    utc_dt      = att_datetime.astimezone(timezone.utc)
+    # Values read back from the DB are UTC — the attendance date must be local
+    push_date   = timezone.localtime(att_datetime).strftime('%Y-%m-%d')
+    utc_dt     = att_datetime.astimezone(timezone.utc)
     check_in_at = utc_dt.isoformat().replace('+00:00', 'Z')
     url = f'{PLAYER_API_BASE}/api/attendance/players/{user_id}'
     payload = {
@@ -108,12 +123,17 @@ def push_attendance_to_local_api(user_id, att_datetime, status, device_name='', 
             print(f'[PUSH] retry PUT {url} → {r.status_code} | {r.text[:200]}')
 
         if r.status_code in (200, 201, 204):
-            return 'sent', f'Player #{user_id} | {push_date}'
+            return 'success', f'Player #{user_id} | {push_date}'
         try:
             err_detail = r.json().get('message', '') or r.text[:150]
         except Exception:
             err_detail = r.text[:150]
-        return 'failed', f'HTTP {r.status_code}: {err_detail}'
+        # Other 4xx mean the API refused this record; retrying cannot help
+        reason = f'HTTP {r.status_code}: {err_detail}'
+        if 400 <= r.status_code < 500 and r.status_code not in (401, 403, 408, 429):
+            print(f'[REJECTED] player={user_id} date={push_date} {reason}')
+            return 'rejected', reason
+        return 'failed', reason
 
     except Exception as e:
         print(f'[PUSH] Exception {url}: {e}')
@@ -121,23 +141,136 @@ def push_attendance_to_local_api(user_id, att_datetime, status, device_name='', 
 
 
 def get_player_info(user_id):
-    """Fetch player info by ZK seq-number. Cached for 30 min per user_id."""
+    """Fetch player info by ZK seq-number. Cached for 30 min per user_id, misses for 60 s."""
+    global _player_api_down
     now = time.time()
     cached = _player_cache.get(user_id)
-    if cached and (now - cached['ts']) < _PLAYER_CACHE_TTL:
+    if cached and (now - cached['ts']) < (_PLAYER_CACHE_TTL if cached['data'] else _PLAYER_MISS_TTL):
         return cached['data']
     try:
         r = _http_session.get(
             f'{PLAYER_API_BASE}/api/public/players/seq/{user_id}', timeout=5
         )
+        _player_api_down = False
         if r.status_code == 200:
             data = r.json()
             _player_cache[user_id] = {'data': data, 'ts': now}
             return data
     except Exception:
-        pass
+        _player_api_down = True
     _player_cache[user_id] = {'data': None, 'ts': now}
     return None
+
+
+_warm_lock = threading.Lock()
+
+def _warm_player_cache(zk_user_ids):
+    """Fetch players in the background so a page never waits on the website."""
+    if not _warm_lock.acquire(blocking=False):
+        return
+    try:
+        for zk_user_id in zk_user_ids:
+            get_player_info(zk_user_id)
+            if _player_api_down:
+                break
+    finally:
+        _warm_lock.release()
+
+
+def _identify_player(zk_user_id):
+    """Return the website player for a ZK User ID, or None until the website has
+    both a name and a real player ID. The ZK number itself is never a player ID."""
+    player = get_player_info(zk_user_id)
+    if player and player.get('fullName') and player.get('userId'):
+        return player
+    return None
+
+
+def _scan_time(att):
+    ts = att.timestamp
+    return timezone.make_aware(datetime(ts.year, ts.month, ts.day, ts.hour, ts.minute, ts.second))
+
+
+def _day_bounds(first_day, last_day):
+    """Local start of first_day and end of last_day. Filtering on these uses the
+    att_datetime index; __date wraps the column in SQL and scans the whole table."""
+    start = timezone.make_aware(datetime.combine(first_day, datetime.min.time()))
+    end   = timezone.make_aware(datetime.combine(last_day + timedelta(days=1), datetime.min.time()))
+    return start, end
+
+
+def _saved_scans(device_ip, first_day):
+    """Scans of this device already in the DB, so a pull only touches the new ones."""
+    start, _ = _day_bounds(first_day, first_day)
+    return set(
+        LiveAttendance.objects.filter(
+            device_ip=device_ip, zk_user_id__gt='', att_datetime__gte=start,
+        ).order_by().values_list('zk_user_id', 'att_datetime')
+    )
+
+
+def save_scan(att, device_ip, device_name):
+    """Save one device scan, whoever it belongs to. Returns (record, created).
+    Every path that reads a device goes through here, so no scan is ever dropped."""
+    zk_user_id = str(att.user_id)
+    att_dt = _scan_time(att)
+    player = _identify_player(zk_user_id)
+    api_user_id = player['userId'] if player else None
+
+    # Rows from before zk_user_id existed can only be matched on the player ID
+    same_person = Q(zk_user_id=zk_user_id)
+    if api_user_id:
+        same_person |= Q(user_id=api_user_id)
+    same_device = LiveAttendance.objects.filter(same_person, device_ip=device_ip)
+
+    existing = same_device.filter(att_datetime=att_dt).order_by('-zk_user_id').first()
+    if existing:
+        if not existing.zk_user_id:
+            existing.zk_user_id = zk_user_id
+            existing.save(update_fields=['zk_user_id'])
+        return existing, False
+
+    defaults = {
+        'user_id':     api_user_id,
+        'status':      att.status,
+        'device_name': device_name or '',
+    }
+    if player:
+        defaults.update(
+            full_name = player['fullName'],
+            reg_no    = player.get('registrationNo') or '',
+            squad     = player.get('squadName') or '',
+            slot      = player.get('slot') or player.get('slotName') or '',
+        )
+    else:
+        defaults['api_reason'] = 'Player not registered on website yet'
+
+    # A double tap is kept as a record, but only the first scan is pushed
+    if same_device.filter(att_datetime__gte=att_dt - timedelta(seconds=60),
+                          att_datetime__lt=att_dt).exists():
+        defaults['api_status'] = 'duplicate'
+        defaults['api_reason'] = 'Already recorded within 60 seconds'
+
+    return LiveAttendance.objects.get_or_create(
+        zk_user_id=zk_user_id, att_datetime=att_dt, device_ip=device_ip,
+        defaults=defaults,
+    )
+
+
+def _push_record(rec):
+    """Push one saved record and store the outcome. Returns (api_status, api_reason)."""
+    api_st, api_rs = push_attendance_to_local_api(
+        rec.user_id, rec.att_datetime, rec.status,
+        rec.device_name or '', rec.device_ip or ''
+    )
+    LiveAttendance.objects.filter(id=rec.id).update(api_status=api_st, api_reason=api_rs)
+    return api_st, api_rs
+
+
+def _push_new_scan(rec):
+    """Push a just-saved scan when its player is known. The rest wait for the retry loop."""
+    if rec.user_id and rec.api_status == 'pending':
+        _push_record(rec)
 
 
 def _push_worker(push_q, sse_q, stop_event):
@@ -199,28 +332,31 @@ def attendance_records(request):
     status_map = {0:'Check-In', 1:'Check-Out', 2:'Break-Out', 3:'Break-In', 4:'OT-In', 5:'OT-Out', 15:'Face-Check-In'}
 
     try:
-        qs = LiveAttendance.objects.filter(att_datetime__date=selected_date)
+        day_start, day_end = _day_bounds(selected_date, selected_date)
+        qs = LiveAttendance.objects.filter(att_datetime__gte=day_start, att_datetime__lt=day_end)
 
         if search:
-            from django.db.models import Q
             qs = qs.filter(
-                Q(full_name__icontains=search) |
-                Q(reg_no__icontains=search)    |
-                Q(squad__icontains=search)     |
-                Q(user_id__icontains=search)
+                Q(full_name__icontains=search)  |
+                Q(reg_no__icontains=search)     |
+                Q(squad__icontains=search)      |
+                Q(user_id__icontains=search)    |
+                Q(zk_user_id__icontains=search)
             )
 
-        unique_ids = list(qs.values_list('user_id', flat=True).distinct())
-        player_cache_local = {}
-        for uid in unique_ids:
-            p = get_player_info(uid)
-            if p:
-                player_cache_local[str(uid)] = p
+        rows = list(qs)
 
-        for row in qs:
-            player = player_cache_local.get(str(row.user_id), {})
+        # Photo, jersey etc. come from the cache only; anything missing is
+        # fetched in the background and shows on the next refresh
+        missing = {r.zk_user_id for r in rows
+                   if r.zk_user_id and r.user_id and r.zk_user_id not in _player_cache}
+        if missing:
+            threading.Thread(target=_warm_player_cache, args=(missing,), daemon=True).start()
+
+        for row in rows:
+            player = (_player_cache.get(row.zk_user_id) or {}).get('data') or {}
             records.append({
-                'user_id':     row.user_id,
+                'user_id':     row.user_id or row.zk_user_id,
                 'datetime':    row.att_datetime.strftime('%Y-%m-%d %H:%M:%S'),
                 'time_only':   row.att_datetime.strftime('%I:%M:%S %p'),
                 'status':      row.status,
@@ -296,56 +432,27 @@ def live_attendance_stream(request):
                         none_count = 0  # real scan received → device definitely alive
                         if attendance:
                             # Cache hit = instant; cache miss = 1 HTTP GET (then cached)
-                            player = get_player_info(attendance.user_id)
-                            if not player or not player.get('fullName'):
-                                print(f'[SKIP] Unknown user_id {attendance.user_id}')
-                                continue
-                            ts = attendance.timestamp
-                            att_datetime = timezone.make_aware(
-                                datetime(ts.year, ts.month, ts.day, ts.hour, ts.minute, ts.second)
-                            )
-                            api_user_id = player.get('userId') or attendance.user_id
-                            timestamp_str = att_datetime.strftime('%Y-%m-%d %H:%M:%S')
+                            player = _identify_player(attendance.user_id) or {}
+                            timestamp_str = attendance.timestamp.strftime('%Y-%m-%d %H:%M:%S')
 
                             api_status, api_reason = 'pending', 'Sending to API...'
                             try:
-                                window_start = att_datetime - timedelta(seconds=60)
-                                already_exists = LiveAttendance.objects.filter(
-                                    user_id=api_user_id,
-                                    device_ip=device_ip or '',
-                                    att_datetime__gte=window_start,
-                                    att_datetime__lte=att_datetime,
-                                ).exists()
-                                if not already_exists:
-                                    rec, created = LiveAttendance.objects.get_or_create(
-                                        user_id     = api_user_id,
-                                        att_datetime= att_datetime,
-                                        device_ip   = device_ip or '',
-                                        defaults={
-                                            'status':      attendance.status,
-                                            'device_name': device_name or '',
-                                            'full_name':   player.get('fullName') or '',
-                                            'reg_no':      player.get('registrationNo') or '',
-                                            'squad':       player.get('squadName') or '',
-                                            'slot':        player.get('slot') or player.get('slotName') or '',
-                                        }
-                                    )
-                                    if created:
-                                        push_q.put({
-                                            'rec_id':        rec.id,
-                                            'user_id':       api_user_id,
-                                            'att_datetime':  att_datetime,
-                                            'att_status':    attendance.status,
-                                            'device_name':   device_name or '',
-                                            'device_ip':     device_ip or '',
-                                            'timestamp_str': timestamp_str,
-                                        })
-                                    else:
-                                        api_status = 'duplicate'
-                                        api_reason = 'Exact record already exists'
-                                else:
+                                rec, created = save_scan(attendance, device_ip or '', device_name)
+                                if not created:
                                     api_status = 'duplicate'
-                                    api_reason = 'Already recorded within 60 seconds'
+                                    api_reason = 'Exact record already exists'
+                                elif rec.user_id and rec.api_status == 'pending':
+                                    push_q.put({
+                                        'rec_id':        rec.id,
+                                        'user_id':       rec.user_id,
+                                        'att_datetime':  rec.att_datetime,
+                                        'att_status':    attendance.status,
+                                        'device_name':   device_name or '',
+                                        'device_ip':     device_ip or '',
+                                        'timestamp_str': timestamp_str,
+                                    })
+                                else:
+                                    api_status, api_reason = rec.api_status, rec.api_reason
                             except Exception as db_err:
                                 api_status = 'failed'
                                 api_reason = f'DB error: {str(db_err)[:120]}'
@@ -428,9 +535,26 @@ def auto_attendance_page(request):
     return render(request, 'userdata/auto_attendance.html')
 
 
+_pull_lock = threading.Lock()
+_last_pull = {'results': [], 'total_saved': 0, 'timestamp': None}
+_device_reads = {}  # {device_ip: {'records': int, 'ts': float}} — last complete read
+
+
 def do_pull_from_devices():
-    """Core pull logic — runs from background thread OR view."""
+    """Save new device scans. Only one pull runs at a time; a second caller gets the last result."""
+    global _last_pull
+    if not _pull_lock.acquire(blocking=False):
+        return _last_pull
+    try:
+        _last_pull = _pull_from_devices()
+        return _last_pull
+    finally:
+        _pull_lock.release()
+
+
+def _pull_from_devices():
     today = datetime.now().date()
+    earliest = today - timedelta(days=_PULL_LOOKBACK_DAYS)
     results = []
     total_saved = 0
 
@@ -448,49 +572,32 @@ def do_pull_from_devices():
             zk = ZK(d.DeviceIp, port=d.Port or 4370, timeout=8)
             conn = zk.connect()
             dev_name = conn.get_device_name() or d.DeviceName
+
+            # Downloading the whole log is the slow part, so skip it when nothing changed
+            conn.read_sizes()
+            last_read = _device_reads.get(d.DeviceIp)
+            if (last_read and last_read['records'] == conn.records
+                    and time.time() - last_read['ts'] < _DEVICE_FULL_READ_SECONDS):
+                results.append({'ip': d.DeviceIp, 'name': dev_name, 'status': 'ok', 'saved': 0})
+                continue
+
             attendances = conn.get_attendance()
+            known = _saved_scans(d.DeviceIp, earliest)
             saved = 0
+            all_saved = True
             for att in attendances:
-                if att.timestamp.date() >= today:
+                if (att.timestamp.date() >= earliest
+                        and (str(att.user_id), _scan_time(att)) not in known):
                     try:
-                        ts = att.timestamp
-                        att_dt = timezone.make_aware(
-                            datetime(ts.year, ts.month, ts.day, ts.hour, ts.minute, ts.second)
-                        )
-                        player = get_player_info(att.user_id) or {}
-                        api_user_id = player.get('userId') or att.user_id
-                        window_start = att_dt - timedelta(seconds=60)
-                        already_exists = LiveAttendance.objects.filter(
-                            user_id=api_user_id,
-                            device_ip=d.DeviceIp,
-                            att_datetime__gte=window_start,
-                            att_datetime__lte=att_dt,
-                        ).exists()
-                        if not already_exists:
-                            rec, created = LiveAttendance.objects.get_or_create(
-                                user_id     =api_user_id,
-                                att_datetime=att_dt,
-                                device_ip   =d.DeviceIp,
-                                defaults={
-                                    'status':      att.status,
-                                    'device_name': dev_name or '',
-                                    'full_name':   player.get('fullName') or '',
-                                    'reg_no':      player.get('registrationNo') or '',
-                                    'squad':       player.get('squadName') or '',
-                                    'slot':        player.get('slot') or player.get('slotName') or '',
-                                }
-                            )
-                            if created:
-                                saved += 1
-                                api_st, api_rs = push_attendance_to_local_api(
-                                    api_user_id, att_dt, att.status,
-                                    dev_name or '', d.DeviceIp
-                                )
-                                rec.api_status = api_st
-                                rec.api_reason = api_rs
-                                rec.save(update_fields=['api_status', 'api_reason'])
-                    except Exception:
-                        pass
+                        rec, created = save_scan(att, d.DeviceIp, dev_name)
+                        if created:
+                            saved += 1
+                            _push_new_scan(rec)
+                    except Exception as e:
+                        all_saved = False
+                        print(f'[PULL] {d.DeviceIp} user={att.user_id} {att.timestamp} not saved: {e}')
+            if all_saved:
+                _device_reads[d.DeviceIp] = {'records': conn.records, 'ts': time.time()}
             total_saved += saved
             results.append({'ip': d.DeviceIp, 'name': dev_name, 'status': 'ok', 'saved': saved})
         except Exception as e:
@@ -512,46 +619,87 @@ def do_pull_from_devices():
 
 # Background auto-pull every 5 minutes (runs even when browser is closed)
 def _background_pull_loop():
+    time.sleep(30)  # let the server finish startup, then catch up on anything missed
     while True:
-        time.sleep(5 * 60)
         try:
             do_pull_from_devices()
             print(f'[AUTO-PULL] {datetime.now().strftime("%H:%M:%S")} — done')
         except Exception as e:
             print(f'[AUTO-PULL] Error: {e}')
+        time.sleep(5 * 60)
 
 _bg_thread = threading.Thread(target=_background_pull_loop, daemon=True)
 _bg_thread.start()
 
 
+def _attach_player(rec, player):
+    """Fill in the real player on a waiting scan, which makes it ready to push."""
+    api_user_id = player['userId']
+    already_saved = LiveAttendance.objects.filter(
+        user_id=api_user_id,
+        att_datetime=rec.att_datetime,
+        device_ip=rec.device_ip,
+    ).exclude(id=rec.id).exists()
+    if already_saved:
+        rec.api_status = 'duplicate'
+        rec.api_reason = 'Same scan already saved with the real player ID'
+        rec.save(update_fields=['api_status', 'api_reason'])
+        return
+
+    rec.user_id   = api_user_id
+    rec.full_name = player.get('fullName') or ''
+    rec.reg_no    = player.get('registrationNo') or ''
+    rec.squad     = player.get('squadName') or ''
+    rec.slot      = player.get('slot') or player.get('slotName') or ''
+    rec.save(update_fields=['user_id', 'full_name', 'reg_no', 'squad', 'slot'])
+
+
+def _identify_waiting_scans():
+    """One lookup per ZK User ID, however many scans are waiting on it."""
+    waiting = LiveAttendance.objects.filter(
+        api_status__in=_UNSENT_STATUSES, user_id__isnull=True, zk_user_id__gt='',
+    )
+    for zk_user_id in list(waiting.order_by().values_list('zk_user_id', flat=True).distinct()):
+        player = _identify_player(zk_user_id)
+        if _player_api_down:
+            print('[RETRY] Player API unreachable — lookups stop until next pass')
+            return
+        if player:
+            for rec in list(waiting.filter(zk_user_id=zk_user_id)):
+                try:
+                    _attach_player(rec, player)
+                except Exception as e:
+                    print(f'[RETRY] record={rec.id} error: {e}')
+
+
+def retry_unsent_pushes():
+    """One pass over every record the API has not accepted yet, oldest first."""
+    close_old_connections()
+    _identify_waiting_scans()
+    ready = list(
+        LiveAttendance.objects.filter(
+            api_status__in=_UNSENT_STATUSES, user_id__isnull=False,
+        ).order_by('att_datetime')
+    )
+    if ready:
+        print(f'[RETRY] {len(ready)} unsent record(s) — retrying push...')
+    for rec in ready:
+        try:
+            api_st, api_rs = _push_record(rec)
+            print(f'[RETRY] user={rec.user_id} → {api_st}')
+            if api_st == 'failed' and api_rs.startswith(_RETRY_STOP_REASONS):
+                print('[RETRY] API unreachable — stopping until next pass')
+                break
+        except Exception as e:
+            print(f'[RETRY] record={rec.id} error: {e}')
+
+
 def _retry_pending_loop():
-    """Retry any attendance records stuck in 'pending' status every 2 minutes."""
+    """Retry unsent attendance records every 2 minutes."""
     time.sleep(90)  # initial delay so server finishes startup
     while True:
         try:
-            close_old_connections()
-            from datetime import date as _date
-            today = _date.today()
-            pending = list(
-                LiveAttendance.objects.filter(
-                    api_status__in=['pending', ''],
-                    att_datetime__date=today,
-                ).values('id', 'user_id', 'att_datetime', 'status', 'device_name', 'device_ip')
-            )
-            if pending:
-                print(f'[RETRY] {len(pending)} pending record(s) — retrying push...')
-            for rec in pending:
-                try:
-                    api_st, api_rs = push_attendance_to_local_api(
-                        rec['user_id'], rec['att_datetime'], rec['status'],
-                        rec['device_name'] or '', rec['device_ip'] or ''
-                    )
-                    LiveAttendance.objects.filter(id=rec['id']).update(
-                        api_status=api_st, api_reason=api_rs
-                    )
-                    print(f'[RETRY] user={rec["user_id"]} → {api_st}')
-                except Exception as e:
-                    print(f'[RETRY] user={rec["user_id"]} error: {e}')
+            retry_unsent_pushes()
         except Exception as e:
             print(f'[RETRY LOOP] Error: {e}')
         time.sleep(2 * 60)  # check every 2 minutes
@@ -561,15 +709,13 @@ _retry_thread.start()
 
 
 def api_auto_pull(request):
-    """Pull today's attendance from all ZK devices. Also runs automatically in background."""
-    data = do_pull_from_devices()
-    if 'error' in data and not data.get('results'):
-        return JsonResponse(data)
-    return JsonResponse(data)
+    """Latest pull result. Only the background thread reads devices, so this page never waits on them."""
+    return JsonResponse(_last_pull)
 
 
 def do_pull_back_data(from_date, to_date):
-    """Pull attendance from all ZK devices for a given date range and save to LiveAttendance."""
+    """Pull attendance from all ZK devices for a given date range and save to LiveAttendance.
+    Saved scans are pushed by the retry loop, so this page does not wait on the website."""
     results = []
     total_saved = 0
 
@@ -587,55 +733,24 @@ def do_pull_back_data(from_date, to_date):
             conn = zk.connect()
             dev_name = conn.get_device_name() or d.DeviceName
             attendances = conn.get_attendance()
+            known = _saved_scans(d.DeviceIp, from_date)
             saved = 0
             skipped = 0
             for att in attendances:
                 att_date = att.timestamp.date()
                 if not (from_date <= att_date <= to_date):
                     continue
+                if (str(att.user_id), _scan_time(att)) in known:
+                    skipped += 1
+                    continue
                 try:
-                    ts = att.timestamp
-                    att_dt = timezone.make_aware(
-                        datetime(ts.year, ts.month, ts.day, ts.hour, ts.minute, ts.second)
-                    )
-                    player = get_player_info(att.user_id) or {}
-                    api_user_id = player.get('userId') or att.user_id
-                    window_start = att_dt - timedelta(seconds=60)
-                    already_exists = LiveAttendance.objects.filter(
-                        user_id=api_user_id,
-                        device_ip=d.DeviceIp,
-                        att_datetime__gte=window_start,
-                        att_datetime__lte=att_dt,
-                    ).exists()
-                    if not already_exists:
-                        rec, created = LiveAttendance.objects.get_or_create(
-                            user_id      =api_user_id,
-                            att_datetime =att_dt,
-                            device_ip    =d.DeviceIp,
-                            defaults={
-                                'status':      att.status,
-                                'device_name': dev_name or '',
-                                'full_name':   player.get('fullName') or '',
-                                'reg_no':      player.get('registrationNo') or '',
-                                'squad':       player.get('squadName') or '',
-                                'slot':        player.get('slot') or player.get('slotName') or '',
-                            }
-                        )
-                        if created:
-                            saved += 1
-                            api_st, api_rs = push_attendance_to_local_api(
-                                api_user_id, att_dt, att.status,
-                                dev_name or '', d.DeviceIp
-                            )
-                            rec.api_status = api_st
-                            rec.api_reason = api_rs
-                            rec.save(update_fields=['api_status', 'api_reason'])
-                        else:
-                            skipped += 1
+                    _, created = save_scan(att, d.DeviceIp, dev_name)
+                    if created:
+                        saved += 1
                     else:
                         skipped += 1
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f'[BACK-DATA] {d.DeviceIp} user={att.user_id} {att.timestamp} not saved: {e}')
             total_saved += saved
             results.append({
                 'ip': d.DeviceIp, 'name': dev_name, 'status': 'ok',
@@ -691,23 +806,21 @@ def back_data_page(request):
 
     status_map = {0:'Check-In',1:'Check-Out',2:'Break-Out',3:'Break-In',4:'OT-In',5:'OT-Out',15:'Face-Check-In'}
 
-    qs = LiveAttendance.objects.filter(
-        att_datetime__date__gte=from_date,
-        att_datetime__date__lte=to_date,
-    )
+    range_start, range_end = _day_bounds(from_date, to_date)
+    qs = LiveAttendance.objects.filter(att_datetime__gte=range_start, att_datetime__lt=range_end)
     if search:
-        from django.db.models import Q
         qs = qs.filter(
-            Q(full_name__icontains=search) |
-            Q(reg_no__icontains=search)    |
-            Q(squad__icontains=search)     |
-            Q(user_id__icontains=search)
+            Q(full_name__icontains=search)  |
+            Q(reg_no__icontains=search)     |
+            Q(squad__icontains=search)      |
+            Q(user_id__icontains=search)    |
+            Q(zk_user_id__icontains=search)
         )
 
     records = []
     for row in qs:
         records.append({
-            'user_id':      row.user_id,
+            'user_id':      row.user_id or row.zk_user_id,
             'datetime':     row.att_datetime.strftime('%Y-%m-%d %H:%M:%S'),
             'date_only':    row.att_datetime.strftime('%Y-%m-%d'),
             'time_only':    row.att_datetime.strftime('%I:%M:%S %p'),
@@ -745,12 +858,15 @@ def api_today_records(request):
     today = datetime.now().date()
     status_map = {0: 'Check-In', 1: 'Check-Out', 2: 'Break-Out', 3: 'Break-In', 4: 'OT-In', 5: 'OT-Out'}
 
-    qs = LiveAttendance.objects.filter(att_datetime__date=today).order_by('-att_datetime')[:500]
+    day_start, day_end = _day_bounds(today, today)
+    qs = LiveAttendance.objects.filter(
+        att_datetime__gte=day_start, att_datetime__lt=day_end,
+    ).order_by('-att_datetime')[:500]
     records = []
     for r in qs:
         records.append({
-            'user_id':     r.user_id,
-            'full_name':   r.full_name or f'ID:{r.user_id}',
+            'user_id':     r.user_id or r.zk_user_id,
+            'full_name':   r.full_name or f'ID:{r.user_id or r.zk_user_id}',
             'reg_no':      r.reg_no,
             'squad':       r.squad,
             'time':        r.att_datetime.strftime('%I:%M %p'),
@@ -777,7 +893,7 @@ def api_test_push(request):
     try:
         r = _http_session.post(
             f'{PLAYER_API_BASE}/api/auth/login',
-            json={'login': 'admin@sfa.pk', 'password': 'F0rward@3456'},
+            json={'login': PLAYER_API_LOGIN, 'password': PLAYER_API_PASSWORD},
             timeout=5
         )
         if r.status_code == 200:
@@ -838,7 +954,7 @@ def api_test_push(request):
         recent = LiveAttendance.objects.order_by('-created_at')[:10]
         results['recent_db_records'] = [
             {
-                'user_id':    r.user_id,
+                'user_id':    r.user_id or r.zk_user_id,
                 'full_name':  r.full_name,
                 'time':       r.att_datetime.strftime('%Y-%m-%d %H:%M'),
                 'api_status': r.api_status,
@@ -943,29 +1059,13 @@ def userdata(request):
                         if conn:
                             DeviceName = conn.get_device_name()
                             attendances = conn.get_attendance()
+                            known = _saved_scans(DeviceIp or '', start_date.date())
 
                             for attendance in attendances:
-                                if start_date <= attendance.timestamp:
+                                if (start_date <= attendance.timestamp
+                                        and (str(attendance.user_id), _scan_time(attendance)) not in known):
                                     try:
-                                        ts = attendance.timestamp
-                                        att_dt = timezone.make_aware(
-                                            datetime(ts.year, ts.month, ts.day,
-                                                     ts.hour, ts.minute, ts.second)
-                                        )
-                                        player = get_player_info(attendance.user_id) or {}
-                                        _, created = LiveAttendance.objects.get_or_create(
-                                            user_id      = player.get('userId') or attendance.user_id,
-                                            att_datetime = att_dt,
-                                            device_ip    = DeviceIp or '',
-                                            defaults={
-                                                'status':      attendance.status,
-                                                'device_name': DeviceName or '',
-                                                'full_name':   player.get('fullName') or '',
-                                                'reg_no':      player.get('registrationNo') or '',
-                                                'squad':       player.get('squadName') or '',
-                                                'slot':        player.get('slot') or player.get('slotName') or '',
-                                            }
-                                        )
+                                        _, created = save_scan(attendance, DeviceIp or '', DeviceName)
                                         if created:
                                             add_device_to_list(device_list_with_ip, DeviceIp)
                                     except Exception as e:

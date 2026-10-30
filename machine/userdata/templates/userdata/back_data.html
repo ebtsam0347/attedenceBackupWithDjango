@@ -327,9 +327,9 @@ table.at tbody tr:last-child td{border-bottom:none;}
         </td>
 
         <td>
-          {% if r.api_status == 'sent' %}
-          <span class="api-badge api-sent"><i class="fa fa-check"></i> Sent</span>
-          {% elif r.api_status == 'failed' %}
+          {% if r.api_status == 'success' %}
+          <span class="api-badge api-sent"><i class="fa fa-check"></i> Success</span>
+          {% elif r.api_status == 'failed' or r.api_status == 'rejected' %}
           <span class="api-badge api-failed" title="{{ r.api_reason }}"><i class="fa fa-times"></i> Failed</span>
           {% elif r.api_status == 'duplicate' %}
           <span class="api-badge api-dup"><i class="fa fa-minus"></i> Dup</span>
