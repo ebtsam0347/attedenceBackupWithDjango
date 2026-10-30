@@ -24,6 +24,14 @@ from django.db import connections, IntegrityError
 from django.db import close_old_connections
 import pandas as pd
 import socket as _socket
+from urllib.parse import urlencode
+
+# When output goes to a file Windows uses cp1252, and printing a character it
+# cannot encode raises inside the push code. A log line must never stop a push.
+# line_buffering: without it a crash loses the last log lines, rejections included.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, 'reconfigure'):
+        _stream.reconfigure(errors='backslashreplace', line_buffering=True)
 
 # ── API CONFIG ────────────────────────────────────────────────────────────────
 # Set these three environment variables to run against UAT instead of production
@@ -123,7 +131,7 @@ def push_attendance_to_local_api(user_id, att_datetime, status, device_name='', 
             print(f'[PUSH] retry PUT {url} → {r.status_code} | {r.text[:200]}')
 
         if r.status_code in (200, 201, 204):
-            return 'success', f'Player #{user_id} | {push_date}'
+            return 'success', f'HTTP {r.status_code}: Player #{user_id} | {push_date}'
         try:
             err_detail = r.json().get('message', '') or r.text[:150]
         except Exception:
@@ -317,9 +325,26 @@ def add_error_device_to_list(device_list_with_ip_error, DeviceIp, error_message)
         device_list_with_ip_error.append((DeviceIp, error_message))
 
 
+# Records page tabs: (key, label, icon, api_status values, message when API gave no reason)
+API_TABS = [
+    ('all',       'All Scans',   'fa-list-alt',           None,                  ''),
+    ('success',   'Sent to API', 'fa-check-circle',       ('success',),          'Accepted by API'),
+    ('pending',   'Pending',     'fa-clock-o',            ('pending', ''),       'Waiting to send to API'),
+    ('failed',    'Failed',      'fa-exclamation-circle', ('failed', 'rejected'), 'API did not accept this record'),
+    ('duplicate', 'Duplicate',   'fa-files-o',            ('duplicate',),        'Same scan already recorded'),
+]
+API_STATUS_LABELS = {
+    'success': 'Sent', 'pending': 'Pending', '': 'Pending',
+    'failed': 'Failed', 'rejected': 'Rejected', 'duplicate': 'Duplicate',
+}
+
+
 def attendance_records(request):
     date_str = request.GET.get('date', datetime.now().strftime('%Y-%m-%d'))
     search   = request.GET.get('search', '').strip()
+    api_tab  = request.GET.get('api', 'all')
+    if api_tab not in [tab[0] for tab in API_TABS]:
+        api_tab = 'all'
 
     try:
         selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
@@ -327,9 +352,12 @@ def attendance_records(request):
         selected_date = datetime.now().date()
         date_str = selected_date.strftime('%Y-%m-%d')
 
-    records, stats = [], {'total': 0, 'check_in': 0, 'check_out': 0, 'unique': 0}
+    records, stats = [], {'total': 0, 'unique': 0, 'sent_percent': 0}
     error_msg = ''
     status_map = {0:'Check-In', 1:'Check-Out', 2:'Break-Out', 3:'Break-In', 4:'OT-In', 5:'OT-Out', 15:'Face-Check-In'}
+    tab_counts = {tab[0]: 0 for tab in API_TABS}
+    tab_for_status = {status: tab[0] for tab in API_TABS if tab[3] for status in tab[3]}
+    tab_reasons = {tab[0]: tab[4] for tab in API_TABS}
 
     try:
         day_start, day_end = _day_bounds(selected_date, selected_date)
@@ -354,11 +382,21 @@ def attendance_records(request):
             threading.Thread(target=_warm_player_cache, args=(missing,), daemon=True).start()
 
         for row in rows:
+            row_tab = tab_for_status.get(row.api_status, 'pending')
+            tab_counts['all'] += 1
+            tab_counts[row_tab] += 1
+            if api_tab not in ('all', row_tab):
+                continue
+
             player = (_player_cache.get(row.zk_user_id) or {}).get('data') or {}
+            local_time = timezone.localtime(row.att_datetime)
             records.append({
                 'user_id':     row.user_id or row.zk_user_id,
-                'datetime':    row.att_datetime.strftime('%Y-%m-%d %H:%M:%S'),
-                'time_only':   row.att_datetime.strftime('%I:%M:%S %p'),
+                'datetime':    local_time.strftime('%Y-%m-%d %H:%M:%S'),
+                'time_only':   local_time.strftime('%I:%M:%S %p'),
+                'api_tab':     row_tab,
+                'api_label':   API_STATUS_LABELS.get(row.api_status, row.api_status),
+                'api_reason':  row.api_reason or tab_reasons[row_tab],
                 'status':      row.status,
                 'status_label': status_map.get(row.status, str(row.status)),
                 'device_name': row.device_name,
@@ -373,17 +411,31 @@ def attendance_records(request):
                 'phone':       player.get('phone') or '',
             })
 
-        stats['total']    = len(records)
-        stats['check_in'] = sum(1 for r in records if r['status'] == 0)
-        stats['check_out']= sum(1 for r in records if r['status'] == 1)
-        stats['unique']   = len({r['user_id'] for r in records})
+        stats['total']  = len(rows)
+        stats['unique'] = len({r.user_id or r.zk_user_id for r in rows})
+        # Duplicates are never pushed, so they do not count against the sent share
+        sendable = tab_counts['all'] - tab_counts['duplicate']
+        stats['sent_percent'] = round(tab_counts['success'] * 100 / sendable) if sendable else 0
 
     except Exception as e:
         error_msg = str(e)
 
+    api_tabs = []
+    for key, label, icon, _, _ in API_TABS:
+        params = {'date': date_str, 'api': key}
+        if search:
+            params['search'] = search
+        api_tabs.append({
+            'key': key, 'label': label, 'icon': icon, 'count': tab_counts[key],
+            'url': '?' + urlencode(params), 'active': key == api_tab,
+        })
+
     return render(request, 'userdata/attendance_records.html', {
         'records':       records,
         'stats':         stats,
+        'api_tabs':      api_tabs,
+        'api_tab':       api_tab,
+        'send_status':   send_status(),
         'selected_date': date_str,
         'search':        search,
         'error_msg':     error_msg,
@@ -654,8 +706,13 @@ def _attach_player(rec, player):
     rec.save(update_fields=['user_id', 'full_name', 'reg_no', 'squad', 'slot'])
 
 
+_retry_lock = threading.Lock()  # the 2-minute loop and the Send Now button never overlap
+_last_retry = {'finished_at': '', 'sent': 0, 'failed': 0, 'rejected': 0, 'waiting': 0, 'problem': ''}
+
+
 def _identify_waiting_scans():
-    """One lookup per ZK User ID, however many scans are waiting on it."""
+    """One lookup per ZK User ID, however many scans are waiting on it.
+    Returns False when the player API could not be reached."""
     waiting = LiveAttendance.objects.filter(
         api_status__in=_UNSENT_STATUSES, user_id__isnull=True, zk_user_id__gt='',
     )
@@ -663,19 +720,22 @@ def _identify_waiting_scans():
         player = _identify_player(zk_user_id)
         if _player_api_down:
             print('[RETRY] Player API unreachable — lookups stop until next pass')
-            return
+            return False
         if player:
             for rec in list(waiting.filter(zk_user_id=zk_user_id)):
                 try:
                     _attach_player(rec, player)
                 except Exception as e:
                     print(f'[RETRY] record={rec.id} error: {e}')
+    return True
 
 
-def retry_unsent_pushes():
+def _retry_pass():
     """One pass over every record the API has not accepted yet, oldest first."""
     close_old_connections()
-    _identify_waiting_scans()
+    summary = {'sent': 0, 'failed': 0, 'rejected': 0, 'waiting': 0, 'problem': ''}
+    if not _identify_waiting_scans():
+        summary['problem'] = 'Website could not be reached'
     ready = list(
         LiveAttendance.objects.filter(
             api_status__in=_UNSENT_STATUSES, user_id__isnull=False,
@@ -687,21 +747,68 @@ def retry_unsent_pushes():
         try:
             api_st, api_rs = _push_record(rec)
             print(f'[RETRY] user={rec.user_id} → {api_st}')
+            summary['sent' if api_st == 'success' else api_st] += 1
             if api_st == 'failed' and api_rs.startswith(_RETRY_STOP_REASONS):
                 print('[RETRY] API unreachable — stopping until next pass')
+                summary['problem'] = api_rs[:150]
                 break
         except Exception as e:
             print(f'[RETRY] record={rec.id} error: {e}')
+            summary['failed'] += 1
+            summary['problem'] = str(e)[:150]
+
+    summary['waiting'] = LiveAttendance.objects.filter(
+        api_status__in=_UNSENT_STATUSES, user_id__isnull=True,
+    ).count()
+    return summary
+
+
+def _run_retry_pass():
+    """Caller must hold _retry_lock. Never raises, so a bad pass cannot end the loop."""
+    global _last_retry
+    try:
+        summary = _retry_pass()
+    except Exception as e:
+        print(f'[RETRY LOOP] Error: {e}')
+        summary = {**_last_retry, 'problem': str(e)[:150]}
+    finally:
+        _retry_lock.release()
+    summary['finished_at'] = datetime.now().strftime('%I:%M:%S %p')
+    _last_retry = summary
+
+
+def retry_unsent_pushes():
+    """Run one pass now, unless a pass is already running."""
+    if _retry_lock.acquire(blocking=False):
+        _run_retry_pass()
+
+
+def _retry_in_background():
+    _run_retry_pass()
+    connections.close_all()
+
+
+def send_status():
+    """What the Send Now bar shows."""
+    try:
+        unsent = LiveAttendance.objects.filter(api_status__in=_UNSENT_STATUSES).count()
+    except Exception:
+        unsent = 0
+    return {**_last_retry, 'running': _retry_lock.locked(), 'unsent': unsent}
+
+
+def api_send_pending(request):
+    """GET: progress of the send. POST: start sending now, without waiting for the 2-minute loop."""
+    if request.method == 'POST' and _retry_lock.acquire(blocking=False):
+        threading.Thread(target=_retry_in_background, daemon=True).start()
+    return JsonResponse(send_status())
 
 
 def _retry_pending_loop():
     """Retry unsent attendance records every 2 minutes."""
     time.sleep(90)  # initial delay so server finishes startup
     while True:
-        try:
-            retry_unsent_pushes()
-        except Exception as e:
-            print(f'[RETRY LOOP] Error: {e}')
+        retry_unsent_pushes()
         time.sleep(2 * 60)  # check every 2 minutes
 
 _retry_thread = threading.Thread(target=_retry_pending_loop, daemon=True)
@@ -850,6 +957,7 @@ def back_data_page(request):
         'search':      search,
         'pull_result': pull_result,
         'pull_error':  pull_error,
+        'send_status': send_status(),
     })
 
 

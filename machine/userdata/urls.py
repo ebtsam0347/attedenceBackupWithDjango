@@ -10,6 +10,7 @@ urlpatterns = [
     path('api/auto-pull/', views.api_auto_pull, name='api_auto_pull'),
     path('api/today-records/', views.api_today_records, name='api_today_records'),
     path('api/test-push/', views.api_test_push, name='api_test_push'),
+    path('api/send-pending/', views.api_send_pending, name='api_send_pending'),
     path('back-data/', views.back_data_page, name='back_data'),
     path('devices/', views.devices_page, name='devices'),
 ]
